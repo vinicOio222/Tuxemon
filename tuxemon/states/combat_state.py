@@ -58,6 +58,7 @@ from tuxemon.db import (
     MonsterModel,
     OutputBattle,
 )
+from tuxemon.dda.telemetry import TelemetryRecorder
 from tuxemon.entity.npc import NPC
 from tuxemon.graphics import load_and_scale
 from tuxemon.item.item import Item
@@ -175,6 +176,16 @@ class CombatState(CombatAnimations):
         self.combat_session.set_combat_type(context.combat_type)
         self.combat_session.set_battle_format(context.is_double_battle)
         self.combat_session.set_players(context.teams)
+        
+        # The telemetry record registers every action taken in the fight (Monitor)
+        self.telemetry_recorder = TelemetryRecorder()
+        self.telemetry_saved = False
+        self.telemetry_recorder.record_battle_start(
+            turn=self.combat_session.turn,
+            combat_type=context.combat_type.value,
+            battle_mode=context.battle_mode.value,
+        )
+        
         self._lock_update = self.client.config.combat_click_to_continue
         self.create_combat_dialog()
         self.transition_phase(CombatPhase.BEGIN)
@@ -287,6 +298,17 @@ class CombatState(CombatAnimations):
             self.event_bus.publish("status_applied")
             self.event_bus.publish("update_party_hud")
             c_session.check_decisions(self.session)
+            
+            # Record the state of all monsters at the start of the decision phase
+            self.telemetry_recorder.record_monsters(
+                turn=self.combat_session.turn,
+                monsters=[
+                    monster
+                    for player in self.combat_session.players
+                    for monster in player.monsters
+                ],
+                snapshot_phase="decision",
+            )
             if not self._decision_queue:
                 c_session.initialize_hit_chances()
                 self.process_player_decisions()
@@ -303,12 +325,20 @@ class CombatState(CombatAnimations):
                 c_session.action_queue.from_pending_to_action(c_session.turn)
             c_session.apply_statuses(self.session)
 
-        elif (
-            phase == CombatPhase.RESOLVE_MATCH or phase == CombatPhase.RAN_AWAY
-        ):
+        # Handle end-of-combat phases
+        elif phase == CombatPhase.RESOLVE_MATCH:
             pass
 
+        elif phase == CombatPhase.RAN_AWAY:
+            outcome = (
+                "escaped"
+                if c_session.get_variable("run")
+                else self._player_battle_outcome()
+            )
+            self._save_battle_telemetry(outcome)
+
         elif phase == CombatPhase.DRAW_MATCH:
+            self._save_battle_telemetry("draw")
             message = self.track_battle_results(
                 OutputBattle.DRAW, c_session.defeated_players
             )
@@ -316,6 +346,7 @@ class CombatState(CombatAnimations):
                 self.process_combat_message(message)
 
         elif phase == CombatPhase.HAS_WINNER:
+            self._save_battle_telemetry(self._player_battle_outcome())
             message = self.track_battle_results(
                 OutputBattle.WON,
                 c_session.remaining_players,
@@ -372,6 +403,9 @@ class CombatState(CombatAnimations):
         """Take one action from the queue and do it."""
         if not self.combat_session.action_queue.is_empty():
             action = self.combat_session.action_queue.pop()
+            self.telemetry_recorder.record_action(
+                self.combat_session.turn, action
+            )
             self.perform_action(action.user, action.method, action.target)
             self.combat_session.action_queue.sort()
             self.task(self.check_party_hp, interval=1)
@@ -537,6 +571,39 @@ class CombatState(CombatAnimations):
                 ),
             )
         return message
+
+    def _player_battle_outcome(self) -> str:
+        """Determines the outcome of the battle for the player"""
+        
+        if self.session.player in self.combat_session.remaining_players:
+            return "win"
+        if self.session.player in self.combat_session.defeated_players:
+            return "loss"
+        return "unknown"
+
+    def _save_battle_telemetry(self, outcome: str) -> None:
+        """Saves the battle telemetry if it hasn't been saved already."""
+        
+        if self.telemetry_saved:
+            return
+
+        self.telemetry_recorder.record_monsters(
+            turn=self.combat_session.turn,
+            monsters=[
+                monster
+                for player in self.combat_session.players
+                for monster in player.monsters
+            ],
+            snapshot_phase="final",
+        )
+        self.telemetry_recorder.record_battle_end(
+            self.combat_session.turn, outcome
+        )
+        try:
+            self.telemetry_recorder.write()
+        except OSError:
+            logger.exception("Unable to write battle telemetry")
+        self.telemetry_saved = True
 
     def process_player_decisions(self) -> None:
         """
@@ -881,11 +948,26 @@ class CombatState(CombatAnimations):
         """
         Award experience and money to the winners.
         """
+        monsters = [
+            member
+            for player in self.combat_session.players
+            for member in player.monsters
+        ]
+        self.telemetry_recorder.record_monsters(
+            self.combat_session.turn,
+            monsters,
+            snapshot_phase="before_rewards",
+        )
         combat_type = self.combat_session.combat_type
         calculator = self.combat_session.get_calculator(combat_type)
         reward_system = RewardSystem(self.session, combat_type, calculator)
         reward_system.apply_penalties(monster)
         rewards = reward_system.award_rewards(monster)
+        self.telemetry_recorder.record_monsters(
+            self.combat_session.turn,
+            monsters,
+            snapshot_phase="after_rewards",
+        )
 
         for data in rewards.winners:
             if data.levels_gained > 0:
