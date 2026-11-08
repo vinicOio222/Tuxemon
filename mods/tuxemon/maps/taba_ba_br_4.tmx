@@ -68,8 +68,9 @@
     <property name="act20" value="translated_dialog tabaacolyte4talk2"/>
     <property name="act21" value="unlock_controls"/>
     <property name="act22" value="add_monster chloragon,5,loch,70,100"/>
-    <property name="act23" value="start_battle player,loch"/>
-    <property name="act24" value="set_variable 1stbattle:done"/>
+    <property name="act23" value="set_environment interior"/>
+    <property name="act24" value="start_battle player,loch"/>
+    <property name="act25" value="set_variable 1stbattle:done"/>
     <property name="cond1" value="is char_at player"/>
     <property name="cond2" value="is char_facing player,down"/>
     <property name="cond3" value="not variable_set tabaacolyte4battle:finished"/>
@@ -105,7 +106,8 @@
     <property name="act11" value="translated_dialog tabaacolyte4talk3"/>
     <property name="act12" value="add_monster mystikapi,5,loch,70,100"/>
     <property name="act13" value="set_monster_status"/>
-    <property name="act14" value="start_battle player,loch"/>
+    <property name="act14" value="set_environment interior"/>
+    <property name="act15" value="start_battle player,loch"/>
     <property name="act17" value="set_variable 2ndbattle:done"/>
     <property name="cond1" value="is variable_set 1stbattle:done"/>
     <property name="cond2" value="is variable_set battle_last_result:won"/>
@@ -117,7 +119,8 @@
     <property name="act11" value="translated_dialog tabaacolyte4talk4"/>
     <property name="act12" value="add_monster lambert,8,loch,115,100"/>
     <property name="act13" value="set_monster_status"/>
-    <property name="act14" value="start_battle player,loch"/>
+    <property name="act14" value="set_environment interior"/>
+    <property name="act15" value="start_battle player,loch"/>
     <property name="act17" value="set_variable 3rdbattle:done"/>
     <property name="cond1" value="is variable_set 2ndbattle:done"/>
     <property name="cond2" value="is variable_set battle_last_result:won"/>
