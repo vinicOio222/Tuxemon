@@ -6,14 +6,7 @@ from tuxemon.dda.telemetry import TelemetryEvent
 
 @dataclass(frozen=True)
 class CombatIndicators:
-    """Represents combat indicators for a battle.
-    
-    Attributes:
-        player_health: The health of the player's monster.
-        opponent_health: The health of the opponent's monster.
-        player_availability: The availability of the player's monster.
-        opponent_availability: The availability of the opponent's monster.
-    """
+    """Represents combat indicators for a battle."""
     
     player_health: float
     opponent_health: float
@@ -86,7 +79,8 @@ def calculate_combat_indicators(
         if not members:
             raise ValueError("Team has no initially available monsters")
 
-        # Calculate the total current health, maximum health, and number of available monsters for the team
+        # Calculate the total current health, maximum health,
+        # and number of available monsters for the team
         health = sum(member["current_hp"] for member in members)
         maximum = sum(member["max_hp"] for member in members)
         available = sum(not member["fainted"] for member in members)

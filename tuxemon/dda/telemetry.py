@@ -24,14 +24,7 @@ logger = logging.getLogger(__name__)
 
 
 class TelemetryEventType(str,Enum):
-    """Types of telemetry events.
-    
-    Attributes:
-        BATTLE_STARTED: Indicates the start of a battle.
-        BATTLE_ENDED: Indicates the end of a battle.
-        ACTION: Represents an action taken by a monster.
-        MONSTER_SNAPSHOT: Represents a snapshot of a monster's state.
-    """
+    """Types of telemetry events."""
     
     BATTLE_STARTED = "battle_started"
     BATTLE_ENDED = "battle_ended"
@@ -41,15 +34,7 @@ class TelemetryEventType(str,Enum):
 
 @dataclass(frozen=True)
 class TelemetryEvent:
-    """A single structured observation from a battle.
-    
-    Attributes:
-        event_type: The type of the event.
-        battle_id: The unique identifier of the battle.
-        turn: The turn number when the event occurred.
-        timestamp: The timestamp of the event in ISO 8601 format.
-        data: Additional data associated with the event.
-    """
+    """A single structured observation from a battle."""
     
     event_type: TelemetryEventType
     battle_id: str

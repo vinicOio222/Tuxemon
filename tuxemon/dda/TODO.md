@@ -19,6 +19,7 @@ tuxemon/dda/
 		telemetry.py
 		indicators.py
 		fuzzy.py
+		player_model.py
 		policy.py
 		adapters.py
 		controller.py
@@ -32,6 +33,7 @@ tests/tuxemon/
 		test_telemetry.py
 		test_dda_indicators.py
 		test_dda_fuzzy.py
+		test_dda_player_model.py
 		test_dda_policy.py
 		test_dda_adapters.py
 		test_dda_controller.py
@@ -45,6 +47,7 @@ planned structure, not a list of files already implemented.
 | telemetry.py | Observations and JSONL export | Monitor |
 | indicators.py | Initial baseline and normalized signals | Monitor/Analyze |
 | fuzzy.py | Membership degrees, rules, inference, and defuzzification | Analyze |
+| player_model.py | Representation of the player's state and performance | Analyze |
 | policy.py | Adjustment selection, bounds, and stability | Plan |
 | adapters.py | Applying adjustments to the game's AI | Execute |
 | controller.py | Coordination and per-battle lifecycle | Orchestration |
