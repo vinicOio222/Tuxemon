@@ -1,8 +1,14 @@
+"""Telemetry system for recording structured battle events in Tuxemon battles."""
+
 from __future__ import annotations
 
 import json
+import logging
+from collections.abc import Callable
+from copy import deepcopy
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
+from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
@@ -14,11 +20,38 @@ if TYPE_CHECKING:
     from tuxemon.monster.monster import Monster
 
 
+logger = logging.getLogger(__name__)
+
+
+class TelemetryEventType(str,Enum):
+    """Types of telemetry events.
+    
+    Attributes:
+        BATTLE_STARTED: Indicates the start of a battle.
+        BATTLE_ENDED: Indicates the end of a battle.
+        ACTION: Represents an action taken by a monster.
+        MONSTER_SNAPSHOT: Represents a snapshot of a monster's state.
+    """
+    
+    BATTLE_STARTED = "battle_started"
+    BATTLE_ENDED = "battle_ended"
+    ACTION = "action"
+    MONSTER_SNAPSHOT = "monster_snapshot"
+
+
 @dataclass(frozen=True)
 class TelemetryEvent:
-    """A single structured observation from a battle."""
+    """A single structured observation from a battle.
     
-    event_type: str
+    Attributes:
+        event_type: The type of the event.
+        battle_id: The unique identifier of the battle.
+        turn: The turn number when the event occurred.
+        timestamp: The timestamp of the event in ISO 8601 format.
+        data: Additional data associated with the event.
+    """
+    
+    event_type: TelemetryEventType
     battle_id: str
     turn: int
     timestamp: str
@@ -35,14 +68,17 @@ class TelemetryRecorder:
         self,
         battle_id: str | None = None,
         output_dir: Path | None = None,
-    ):
+        *,
+        on_event: Callable[[TelemetryEvent], None] | None = None
+    ) -> None:
         self.battle_id = battle_id or str(uuid4())
         self.output_dir = output_dir or USER_RECORDING_DIR / "telemetry"
         self.events: list[TelemetryEvent] = []
-         
+        self.on_event = on_event
+    
     def record(
         self,
-        event_type: str,
+        event_type: TelemetryEventType,
         turn: int,
         data: dict[str, Any]
     ) -> TelemetryEvent:
@@ -52,10 +88,22 @@ class TelemetryRecorder:
             battle_id=self.battle_id,
             turn=turn,
             timestamp=datetime.now(timezone.utc).isoformat(),
-            data=data,
+            data=deepcopy(data),
         )
         self.events.append(event)
-        return event
+        
+        if self.on_event is not None:
+            try:
+                self.on_event(deepcopy(event))
+            except Exception:
+                logger.exception(
+                    "Telemetry consumer failed: battle=%s event=%s turn=%s",
+                    self.battle_id,
+                    event.event_type,
+                    turn,
+                )
+        
+        return deepcopy(event)
     
     def record_battle_start(
         self,
@@ -65,7 +113,7 @@ class TelemetryRecorder:
     ) -> TelemetryEvent:
         """Record the start of a battle."""
         return self.record(
-            "battle_started",
+            TelemetryEventType.BATTLE_STARTED,
             turn,
             {"combat_type": combat_type, "battle_mode": battle_mode},
         )
@@ -76,7 +124,7 @@ class TelemetryRecorder:
         outcome: str,
     ) -> TelemetryEvent:
         return self.record(
-            "battle_ended",
+            TelemetryEventType.BATTLE_ENDED,
             turn,
             {"outcome": outcome}
         )
@@ -105,7 +153,7 @@ class TelemetryRecorder:
                 break
             
         return self.record(
-            "action",
+            TelemetryEventType.ACTION,
             turn,
             {
                 "user": self._entity_slug(action.user),
@@ -125,7 +173,7 @@ class TelemetryRecorder:
     ) -> TelemetryEvent:
         """Records the state of all monsters in the battle."""
         return self.record(
-            event_type="monster_snapshot",
+            event_type=TelemetryEventType.MONSTER_SNAPSHOT,
             turn=turn,
             data={
                 "snapshot_phase": snapshot_phase,
