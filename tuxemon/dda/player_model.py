@@ -1,40 +1,14 @@
 from collections import deque
 from copy import deepcopy
-from dataclasses import asdict, dataclass, replace
-from typing import Any
+from dataclasses import replace
 
-from tuxemon.dda.indicators import (
-    calculate_combat_indicators,
-    CombatIndicators
+from tuxemon.dda.indicators import (calculate_combat_indicators)
+from tuxemon.dda.types import (
+    BattleRecord,
+    PlayerIndicators,
+    OutcomesType    
 )
 from tuxemon.dda.telemetry import TelemetryEvent, TelemetryEventType
-
-
-@dataclass(frozen=True)
-class BattleRecord:
-    """A record of a single battle's outcome and performance indicators."""
-    
-    battle_id: str
-    turns: int
-    combat: CombatIndicators
-    health_phase: str
-    player_fainted: int
-    opponents_fainted: int
-    outcome: str | None = None
-    
-
-@dataclass(frozen=True)
-class PlayerIndicators:
-    """Aggregated indicators of the player's performance over recent battles."""
-    
-    current: BattleRecord | None
-    recent: tuple[BattleRecord, ...]
-    sample_size: int
-    outcomes: dict[str, int]
-    average_turns: float | None
-    
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
 
 
 class PlayerModel:
@@ -111,7 +85,7 @@ class PlayerModel:
             )
         elif event.event_type == TelemetryEventType.BATTLE_ENDED:
             outcome = event.data["outcome"]
-            if outcome not in {"win", "loss", "draw", "escaped"} or self._current is None:
+            if outcome not in OutcomesType.members() or self._current is None:
                 raise ValueError("Missing observations or invalid outcome.")
             
             completed = replace(
@@ -130,7 +104,7 @@ class PlayerModel:
             outcome: sum(
                 row.outcome == outcome for row in self._recent
             )
-            for outcome in ("win", "loss", "draw", "escaped")
+            for outcome in OutcomesType.members()
         }
         
         # Calculate the average number of turns across recent battles, if any.
