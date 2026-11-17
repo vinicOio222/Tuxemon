@@ -6,7 +6,8 @@ from tuxemon.dda.indicators import (calculate_combat_indicators)
 from tuxemon.dda.types import (
     BattleRecord,
     PlayerIndicators,
-    OutcomesType    
+    OutcomesType,
+    SnapshotPhase,
 )
 from tuxemon.dda.telemetry import TelemetryEvent, TelemetryEventType
 
@@ -52,8 +53,12 @@ class PlayerModel:
         
         # Process the event based on its type and update the player's model state accordingly.
         if event.event_type == TelemetryEventType.MONSTER_SNAPSHOT:
+            phase = event.data.get("snapshot_phase")
+            if phase == SnapshotPhase.AFTER_REWARDS:
+                return
+
             if self._baseline is None:
-                if event.turn != 1 or event.data["snapshot_phase"] != "decision":
+                if event.turn != 1 or event.data["snapshot_phase"] != SnapshotPhase.DECISION:
                     raise ValueError("The first snapshot must be turn 1 decision.")
                 self._baseline = deepcopy(event)
             

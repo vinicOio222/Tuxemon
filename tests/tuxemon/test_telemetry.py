@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 from uuid import uuid4
@@ -7,6 +8,7 @@ import pytest
 
 from tuxemon.combat.machine import CombatPhase
 from tuxemon.dda.telemetry import TelemetryRecorder
+from tuxemon.dda.types import OutcomesType, TelemetryEventType
 from tuxemon.monster.monster import Monster
 from tuxemon.monster.stats import BasicStats
 from tuxemon.monster.status import MonsterStatusHandler
@@ -45,6 +47,41 @@ def test_recorder_generates_battle_id_and_writes_jsonl(tmp_path):
         "battle_mode": "single",
     }
     assert events[1]["data"] == {"outcome": "win"}
+
+
+@pytest.mark.parametrize(
+    "outcome",
+    [
+        pytest.param(outcome.value, id=outcome.value)
+        for outcome in OutcomesType
+    ],
+)
+def test_recorder_accepts_supported_battle_outcomes(outcome):
+    recorder = TelemetryRecorder()
+
+    event = recorder.record_battle_end(4, outcome)
+
+    assert event.event_type is TelemetryEventType.BATTLE_ENDED
+    assert event.data == {"outcome": outcome}
+
+
+def test_recorder_rejects_unknown_battle_outcome():
+    recorder = TelemetryRecorder()
+
+    with pytest.raises(ValueError, match="Unknown battle outcome"):
+        recorder.record_battle_end(4, "invalid")
+
+
+def test_event_keeps_datetime_and_serializes_it_as_iso8601():
+    recorder = TelemetryRecorder()
+
+    event = recorder.record_battle_start(0, "trainer", "single")
+    serialized = event.to_dict()
+
+    assert isinstance(event.timestamp, datetime)
+    assert event.timestamp.tzinfo == timezone.utc
+    assert datetime.fromisoformat(serialized["timestamp"]).tzinfo == timezone.utc
+    assert serialized["event_type"] == "battle_started"
 
 
 def test_monster_snapshot_uses_real_health_properties_and_writes_jsonl(
@@ -103,12 +140,28 @@ def test_decision_phase_records_monsters_and_processes_decisions(
     state.process_player_decisions.assert_called_once_with()
 
 
-def test_record_monsters_accepts_snapshot_phase(tmp_path, monster):
+@pytest.mark.parametrize(
+    "snapshot_phase",
+    [
+        pytest.param("decision", id="decision"),
+        pytest.param("before_rewards", id="before_rewards"),
+        pytest.param("after_rewards", id="after_rewards"),
+        pytest.param("final", id="final"),
+    ],
+)
+def test_record_monsters_accepts_snapshot_phase(tmp_path, monster, snapshot_phase):
     recorder = TelemetryRecorder(output_dir=tmp_path)
 
-    event = recorder.record_monsters(5, [monster], snapshot_phase="final")
+    event = recorder.record_monsters(5, [monster], snapshot_phase=snapshot_phase)
 
-    assert event.data["snapshot_phase"] == "final"
+    assert event.data["snapshot_phase"] == snapshot_phase
+
+
+def test_record_monsters_rejects_unknown_snapshot_phase(tmp_path, monster):
+    recorder = TelemetryRecorder(output_dir=tmp_path)
+
+    with pytest.raises(ValueError, match="Unknown snapshot phase"):
+        recorder.record_monsters(5, [monster], snapshot_phase="invalid")
 
 
 def test_battle_end_writes_final_snapshot_once(tmp_path, monster):
@@ -118,7 +171,10 @@ def test_battle_end_writes_final_snapshot_once(tmp_path, monster):
         players=[SimpleNamespace(monsters=[monster])],
     )
     state.telemetry_recorder = TelemetryRecorder(output_dir=tmp_path)
+    state.telemetry_outcome = None
     state.telemetry_saved = False
+    state.telemetry_final_snapshot_recorded = False
+    state.telemetry_end_recorded = False
 
     CombatState._save_battle_telemetry(state, "win")
     CombatState._save_battle_telemetry(state, "win")
@@ -133,6 +189,58 @@ def test_battle_end_writes_final_snapshot_once(tmp_path, monster):
     assert events[0]["data"]["monsters"][0]["current_hp"] == 10
     assert events[1]["data"]["outcome"] == "win"
     assert state.telemetry_saved is True
+
+
+def test_end_combat_retries_failed_telemetry_write(tmp_path, monster, monkeypatch):
+    state = MagicMock(spec=CombatState)
+    recorder = TelemetryRecorder(output_dir=tmp_path)
+    state.telemetry_recorder = recorder
+    state.telemetry_outcome = "win"
+    state.telemetry_saved = False
+    state.telemetry_final_snapshot_recorded = False
+    state.telemetry_end_recorded = False
+    player = SimpleNamespace(
+        monsters=[monster], battle_last_used_item_slug=None
+    )
+    state.combat_session = SimpleNamespace(
+        turn=5, players=[player], reset=MagicMock()
+    )
+    state.event_bus = MagicMock()
+    state.client = MagicMock()
+    state.unregister_event_handlers = MagicMock()
+    state.clear_combat_states = MagicMock()
+    state._save_battle_telemetry = lambda outcome: (
+        CombatState._save_battle_telemetry(state, outcome)
+    )
+    state._captured_mon_is_new = False
+    state._captured_mon = None
+
+    original_write = recorder.write
+    attempts = 0
+
+    def fail_once(output_path=None):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise OSError("temporary write failure")
+        return original_write(output_path)
+
+    monkeypatch.setattr(recorder, "write", fail_once)
+
+    CombatState._save_battle_telemetry(state, "win")
+    assert not state.telemetry_saved
+    assert len(recorder.events) == 2
+
+    CombatState.end_combat(state)
+
+    assert state.telemetry_saved
+    assert attempts == 2
+    output_path = tmp_path / f"{recorder.battle_id}.jsonl"
+    events = [json.loads(line) for line in output_path.read_text().splitlines()]
+    assert [event["event_type"] for event in events] == [
+        "monster_snapshot",
+        "battle_ended",
+    ]
 
 
 def test_rewards_record_health_and_level_before_and_after(

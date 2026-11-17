@@ -8,7 +8,6 @@ import os
 
 from collections.abc import Callable
 from copy import deepcopy
-from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import TYPE_CHECKING, Any
@@ -17,11 +16,14 @@ from uuid import uuid4
 from tuxemon.constants.paths import USER_RECORDING_DIR
 from tuxemon.dda.types import (
     ActionData,
+    ActionType,
     MonsterSnapshotData,
+    OutcomesType,
     TelemetryEvent,
     SnapshotPhase,
     TelemetryEventType,
 )
+
 
 if TYPE_CHECKING:
     from tuxemon.combat.action_queue import EnqueuedAction
@@ -51,13 +53,13 @@ class TelemetryRecorder:
         self,
         event_type: TelemetryEventType,
         turn: int,
-        data: dict[str, Any]
+        data: dict[str, Any],
     ) -> TelemetryEvent:
         """Record a single observation."""
         
         if turn < 0:
             raise ValueError("Turn must not be negative.")
-        if event_type == TelemetryEventType.MONSTER_SNAPSHOT.value:
+        if event_type == TelemetryEventType.MONSTER_SNAPSHOT:
             phase = data.get("snapshot_phase")
             if phase not in SnapshotPhase.members():
                 raise ValueError(f"Unknown snapshot phase: {phase!r}")
@@ -68,7 +70,6 @@ class TelemetryRecorder:
             event_type=event_type,
             battle_id=self.battle_id,
             turn=turn,
-            timestamp=datetime.now(timezone.utc).isoformat(),
             data=deepcopy(data),
         )
         self.events.append(event)
@@ -84,6 +85,12 @@ class TelemetryRecorder:
                     turn,
                 )
         
+        logger.info(
+            "Recorded telemetry event: battle=%s event=%s turn=%s",
+            self.battle_id,
+            event.event_type,
+            turn,
+        )
         return deepcopy(event)
     
     def record_battle_start(
@@ -95,7 +102,7 @@ class TelemetryRecorder:
         """Record the start of a battle."""
         
         return self.record(
-            TelemetryEventType.BATTLE_STARTED.value,
+            TelemetryEventType.BATTLE_STARTED,
             turn,
             {"combat_type": combat_type, "battle_mode": battle_mode},
         )
@@ -109,11 +116,11 @@ class TelemetryRecorder:
         
         if self._ended_event is not None:
             return deepcopy(self._ended_event)
-        if outcome != "win":
-            raise ValueError("Only the win outcome is supported.")
+        if outcome not in OutcomesType.members():
+            raise ValueError(f"Unknown battle outcome: {outcome!r}")
 
         event = self.record(
-            TelemetryEventType.BATTLE_ENDED.value,
+            TelemetryEventType.BATTLE_ENDED,
             turn,
             {"outcome": outcome}
         )
@@ -132,24 +139,24 @@ class TelemetryRecorder:
         from tuxemon.technique.technique import Technique
         
         method = action.method
-        action_kind = "unknown"
+        action_kind = ActionType.UNKNOWN
         
         for method_type, kind in (
-            (Item, "item"),
-            (Status, "status"),
-            (Technique, "technique")
+            (Item, ActionType.ITEM),
+            (Status, ActionType.STATUS),
+            (Technique, ActionType.TECHNIQUE)
         ):
             if isinstance(method, method_type):
                 action_kind = kind
                 break
-        
+
         # Create a structured representation of the action data.
         action_data = ActionData(
             execution="attempt",
             user=self._entity_slug(action.user),
             user_instance_id=self._entity_id(action.user),
             user_owner_instance_id=self._user_owner_id(action.user),
-            user_is_player=self._user_is_player(action.user),
+            user_is_player=self._is_user_player(action.user),
             method=self._entity_slug(method),
             action_kind=action_kind,
             target=self._entity_slug(action.target),
@@ -157,7 +164,7 @@ class TelemetryRecorder:
         )
         
         return self.record(
-            TelemetryEventType.ACTION.value,
+            TelemetryEventType.ACTION,
             turn, action_data.to_dict()
         )
         
@@ -165,12 +172,12 @@ class TelemetryRecorder:
         self,
         turn: int,
         monsters: list[Monster],
-        snapshot_phase: str = "decision",
+        snapshot_phase: SnapshotPhase = SnapshotPhase.DECISION,
     ) -> TelemetryEvent:
         """Records the state of all monsters in the battle."""
         
         return self.record(
-            event_type=TelemetryEventType.MONSTER_SNAPSHOT.value,
+            event_type=TelemetryEventType.MONSTER_SNAPSHOT,
             turn=turn,
             data={
                 "snapshot_phase": snapshot_phase,
@@ -252,7 +259,7 @@ class TelemetryRecorder:
         return TelemetryRecorder._entity_id(user)
 
     @staticmethod
-    def _user_is_player(user: Any) -> bool | None:
+    def _is_user_player(user: Any) -> bool | None:
         """Return the team identity associated with an action user."""
         
         owner = getattr(user, "owner", None)

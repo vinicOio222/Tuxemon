@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from math import isfinite
 
-from tuxemon.dda.telemetry import TelemetryEvent, TelemetryEventType
+from tuxemon.dda.types import TelemetryEvent, TelemetryEventType
 
 
 @dataclass(frozen=True)
@@ -31,7 +31,7 @@ def calculate_combat_indicators(
         
         if event.event_type != TelemetryEventType.MONSTER_SNAPSHOT:
             raise ValueError("Expected a monster snapshot")
-        if event.data.get("snapshot_phase") not in {"decision", "before_rewards"}:
+        if event.data.get("snapshot_phase") not in {"decision", "before_rewards", "final"}:
             raise ValueError("Expected a combat snapshot")
         
         result = {}

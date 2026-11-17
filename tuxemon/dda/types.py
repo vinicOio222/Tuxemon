@@ -1,6 +1,12 @@
+from __future__ import annotations
+
+from datetime import datetime, timezone
 from enum import Enum
 from dataclasses import asdict, dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from tuxemon.dda.indicators import CombatIndicators
 
 
 # Enums
@@ -40,10 +46,24 @@ class OutcomesType(str, Enum):
     LOSS = "loss"
     DRAW = "draw"
     ESCAPED = "escaped"
+    UNKNOWN = "unknown"
     
     @staticmethod
     def members() -> set[str]:
         return {outcome.value for outcome in OutcomesType}
+
+
+class ActionType(str, Enum):
+    """Enumeration of action types."""
+
+    ITEM = "item"
+    STATUS = "status"
+    TECHNIQUE = "technique"
+    UNKNOWN = "unknown"
+
+    @staticmethod
+    def members() -> set[str]:
+        return {action_type.value for action_type in ActionType}
 
 
 # Data Classes
@@ -79,7 +99,7 @@ class MonsterSnapshotData:
     max_hp: int
     hp_ratio: float
     fainted: bool
-    statuses: list[str] = field(..., default_factory=list)
+    statuses: list[str] = field(default_factory=list)
     
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -91,8 +111,8 @@ class BattleRecord:
     
     battle_id: str
     turns: int
-    outcome: str | None
     health_phase: str
+    combat: CombatIndicators
     player_fainted: int
     opponents_fainted: int
     outcome: str | None = None
@@ -106,10 +126,28 @@ class PlayerIndicators:
     """Aggregated indicators of the player's performance over recent battles."""
     
     current: BattleRecord | None
-    recent: tuple[BattleRecord, ...] = field(..., default_factory=tuple)
     sample_size: int
-    outcomes: dict[str, int] = field(..., default_factory=dict)
     average_turns: float | None
+    recent: tuple[BattleRecord, ...] = field(default_factory=tuple)
+    outcomes: dict[str, int] = field(default_factory=dict)
     
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+@dataclass(frozen=True)
+class TelemetryEvent:
+    """Represents a telemetry event in the battle system."""
+
+    event_type: TelemetryEventType
+    battle_id: str
+    turn: int
+    data: dict[str, Any]
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    schema_version: str = "1.0.0"
+
+    def to_dict(self) -> dict[str, Any]:
+        event = asdict(self)
+        event["event_type"] = self.event_type.value
+        event["timestamp"] = self.timestamp.isoformat()
+        return event

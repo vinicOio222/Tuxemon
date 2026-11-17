@@ -37,7 +37,7 @@ from __future__ import annotations
 import logging
 import random
 from collections import deque
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from functools import partial
 from typing import TYPE_CHECKING, Any, ClassVar
 
@@ -59,6 +59,7 @@ from tuxemon.db import (
     OutputBattle,
 )
 from tuxemon.dda.telemetry import TelemetryRecorder
+from tuxemon.dda.types import SnapshotPhase
 from tuxemon.entity.npc import NPC
 from tuxemon.graphics import load_and_scale
 from tuxemon.item.item import Item
@@ -114,6 +115,24 @@ EVENT_HANDLERS: dict[str, str] = {
     "play_animation_combat": "_on_play_animation_combat",
     "combat_dialog": "_on_combat_dialog",
 }
+
+
+def record_telemetry(
+    action: Callable[..., Any], *args: Any, **kwargs: Any
+) -> bool:
+    """Record telemetry for a given action.
+
+    Parameters:
+        action: The callable action to record telemetry for.
+        *args: Positional arguments to pass to the action.
+        **kwargs: Keyword arguments to pass to the action.
+    """
+    try:
+        action(*args, **kwargs)
+        return True
+    except Exception as e:
+        logger.exception("Battle telemetry recording failed: %s", e)
+        return False
 
 
 class WaitForInputState(State):
@@ -177,13 +196,23 @@ class CombatState(CombatAnimations):
         self.combat_session.set_battle_format(context.is_double_battle)
         self.combat_session.set_players(context.teams)
         
-        # The telemetry record registers every action taken in the fight (Monitor)
-        self.telemetry_recorder = TelemetryRecorder()
+        # Flags to track telemetry recording status
+        self.telemetry_outcome: str | None = None
         self.telemetry_saved = False
-        self.telemetry_recorder.record_battle_start(
+        self.telemetry_final_snapshot_recorded = False
+        self.telemetry_end_recorded = False
+
+        # Initialize the telemetry recorder with the DDA player model observer.
+        self.telemetry_recorder = TelemetryRecorder(
+            on_event=self.client.dda_player_model.observe
+        )
+
+        # Record the start of the battle for telemetry purposes.
+        record_telemetry(
+            self.telemetry_recorder.record_battle_start,
             turn=self.combat_session.turn,
             combat_type=context.combat_type.value,
-            battle_mode=context.battle_mode.value,
+            battle_mode=context.battle_mode.value
         )
         
         self._lock_update = self.client.config.combat_click_to_continue
@@ -300,14 +329,15 @@ class CombatState(CombatAnimations):
             c_session.check_decisions(self.session)
             
             # Record the state of all monsters at the start of the decision phase
-            self.telemetry_recorder.record_monsters(
+            record_telemetry(
+                self.telemetry_recorder.record_monsters,
                 turn=self.combat_session.turn,
                 monsters=[
                     monster
                     for player in self.combat_session.players
                     for monster in player.monsters
                 ],
-                snapshot_phase="decision",
+                snapshot_phase=SnapshotPhase.DECISION
             )
             if not self._decision_queue:
                 c_session.initialize_hit_chances()
@@ -403,8 +433,10 @@ class CombatState(CombatAnimations):
         """Take one action from the queue and do it."""
         if not self.combat_session.action_queue.is_empty():
             action = self.combat_session.action_queue.pop()
-            self.telemetry_recorder.record_action(
-                self.combat_session.turn, action
+            record_telemetry(
+                self.telemetry_recorder.record_action,
+                self.combat_session.turn,
+                action
             )
             self.perform_action(action.user, action.method, action.target)
             self.combat_session.action_queue.sort()
@@ -587,23 +619,42 @@ class CombatState(CombatAnimations):
         if self.telemetry_saved:
             return
 
-        self.telemetry_recorder.record_monsters(
-            turn=self.combat_session.turn,
-            monsters=[
-                monster
-                for player in self.combat_session.players
-                for monster in player.monsters
-            ],
-            snapshot_phase="final",
-        )
-        self.telemetry_recorder.record_battle_end(
-            self.combat_session.turn, outcome
-        )
-        try:
-            self.telemetry_recorder.write()
-        except OSError:
-            logger.exception("Unable to write battle telemetry")
-        self.telemetry_saved = True
+        # Ensure the telemetry outcome is set and consistent
+        if self.telemetry_outcome is None:
+            self.telemetry_outcome = outcome
+        outcome = self.telemetry_outcome
+
+        # Record the final snapshot of the battle
+        # telemetry if it hasn't been recorded yet
+        if not self.telemetry_final_snapshot_recorded:
+            success = record_telemetry(
+                self.telemetry_recorder.record_monsters,
+                turn=self.combat_session.turn,
+                monsters=[
+                    monster
+                    for player in self.combat_session.players
+                    for monster in player.monsters
+                ],
+                snapshot_phase=SnapshotPhase.FINAL,
+            )
+            if not success:
+                return
+            self.telemetry_final_snapshot_recorded = True
+
+        # Record the end of the battle
+        # telemetry if it hasn't been recorded yet
+        if not self.telemetry_end_recorded:
+            success = record_telemetry(
+               self.telemetry_recorder.record_battle_end,
+               self.combat_session.turn,
+               outcome,
+            )
+            if not success:
+                return
+            self.telemetry_end_recorded = True
+
+        if record_telemetry(self.telemetry_recorder.write):
+            self.telemetry_saved = True
 
     def process_player_decisions(self) -> None:
         """
@@ -953,20 +1004,26 @@ class CombatState(CombatAnimations):
             for player in self.combat_session.players
             for member in player.monsters
         ]
-        self.telemetry_recorder.record_monsters(
+
+        # Record telemetry before applying rewards
+        record_telemetry(
+            self.telemetry_recorder.record_monsters,
             self.combat_session.turn,
             monsters,
-            snapshot_phase="before_rewards",
+            snapshot_phase=SnapshotPhase.BEFORE_REWARDS,
         )
         combat_type = self.combat_session.combat_type
         calculator = self.combat_session.get_calculator(combat_type)
         reward_system = RewardSystem(self.session, combat_type, calculator)
         reward_system.apply_penalties(monster)
         rewards = reward_system.award_rewards(monster)
-        self.telemetry_recorder.record_monsters(
+
+        # Record telemetry after applying rewards
+        record_telemetry(
+            self.telemetry_recorder.record_monsters,
             self.combat_session.turn,
             monsters,
-            snapshot_phase="after_rewards",
+            snapshot_phase=SnapshotPhase.AFTER_REWARDS,
         )
 
         for data in rewards.winners:
@@ -1137,6 +1194,12 @@ class CombatState(CombatAnimations):
 
     def end_combat(self) -> None:
         """End the combat."""
+
+        # Save battle telemetry if it hasn't been
+        # saved yet and an outcome is available
+        if not self.telemetry_saved and self.telemetry_outcome is not None:
+            self._save_battle_telemetry(self.telemetry_outcome)
+
         self.event_bus.publish("clean_combat")
         for player in self.combat_session.players:
             player.battle_last_used_item_slug = None

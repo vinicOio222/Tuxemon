@@ -19,6 +19,7 @@ from tuxemon.combat.session import CombatSession
 from tuxemon.constants import paths
 from tuxemon.core.active_effect import ActiveEffectManager
 from tuxemon.core.asset import init_assets
+from tuxemon.dda.player_model import PlayerModel
 from tuxemon.economy.shop_manager import ShopManager
 from tuxemon.encounter import EncounterManager
 from tuxemon.environment import EnvironmentManager
@@ -192,6 +193,9 @@ class BaseClient(ABC):
         self.shop_manager = ShopManager()
 
         self.command_queue: Queue[Callable[[], None]] = Queue()
+
+        # Initialize the DDA player model for tracking player performance.
+        self.dda_player_model = PlayerModel(window=10)
 
         if self.config.cli:
             local_session.set_client(self)
