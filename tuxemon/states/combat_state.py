@@ -1246,6 +1246,14 @@ class CombatState(CombatAnimations):
         monster: Monster,
         removed: Monster | None = None,
     ) -> None:
+        # The round 1 send-out fills empty slots and is not a switch.
+        if removed is not None or self.combat_session.turn > 1:
+            record_telemetry(
+                self.telemetry_recorder.record_switch,
+                self.combat_session.turn,
+                monster,
+                removed,
+            )
         self.handle_monster_entry(player, monster)
 
     def _on_monster_needed(self, player: NPC, ask: bool = False) -> None:
@@ -1271,6 +1279,11 @@ class CombatState(CombatAnimations):
         self.sprite_map.update_sprite_position(monster, new_feet)
 
     def _on_clean_combat(self) -> None:
+        # Escapes reset the combat session before the RAN_AWAY phase runs, so
+        # the final telemetry must be saved here while turn and players exist.
+        if not self.telemetry_saved and self.combat_session.get_variable("run"):
+            self._save_battle_telemetry("escaped")
+
         for player in self.combat_session.players:
             for mon in player.monsters:
                 mon.end_combat(self.session)
@@ -1382,15 +1395,27 @@ class CombatState(CombatAnimations):
         Handles logic and data changes.
         """
         if is_captured:
-            owner = monster.get_owner()
+            # The capture resets the combat session below, so the final
+            # telemetry must be saved while turn and players still exist.
+            self._save_battle_telemetry(self._player_battle_outcome())
+
+            # The monster's owner is already the player at this point, so the
+            # wild opponent is looked up from the session instead.
+            wild = next(
+                (
+                    npc for npc in self.combat_session.players
+                    if npc is not self.session.player
+                ),
+                None,
+            )
             self._captured_mon = monster
             self._captured_mon_is_new = bool(
                 self.combat_session.get_variable("new_tuxepedia")
             )
 
-            if owner:
-                self.combat_session.field_monsters.remove_npc(owner)
-                self.combat_session.remove_player(owner)
+            if wild:
+                self.combat_session.field_monsters.remove_npc(wild)
+                self.combat_session.remove_player(wild)
 
             self.combat_session.reset()
 

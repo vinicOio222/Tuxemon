@@ -9,6 +9,9 @@ if TYPE_CHECKING:
     from tuxemon.dda.indicators import CombatIndicators
 
 
+TELEMETRY_SCHEMA_VERSION = "1.0.0"
+
+
 # Enums
 class SnapshotPhase(str, Enum):
     """Enumeration of snapshot phases in a battle."""
@@ -30,6 +33,7 @@ class TelemetryEventType(str, Enum):
     BATTLE_ENDED = "battle_ended"
     BATTLE_STARTED = "battle_started"
     MONSTER_SNAPSHOT = "monster_snapshot"
+    SWITCH = "switch"
     
     @staticmethod
     def members() -> set[str]:
@@ -144,7 +148,7 @@ class TelemetryEvent:
     turn: int
     data: dict[str, Any]
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    schema_version: str = "1.0.0"
+    schema_version: str = TELEMETRY_SCHEMA_VERSION
 
     def to_dict(self) -> dict[str, Any]:
         event = asdict(self)

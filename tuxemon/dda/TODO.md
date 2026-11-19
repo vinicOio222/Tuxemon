@@ -68,7 +68,8 @@ interfaces.
 - [x] Test JSONL, real health properties, decisions, single finalization,
 	and preservation of the state before rewards.
 - [x] Inspect a real victory log with the corrected phases.
-- [ ] Validate real defeat, escape, item-use, and switching logs.
+- [x] Validate real item-use log (potion, outcome `win`, no ordering or ID errors).
+- [x] Validate real defeat, escape, and switching logs (forced switch in `a29b2add`).
 - [ ] Define a versioned event contract and document optional fields.
 - [ ] Define actions as execution attempts; do not confuse them with hits,
 	damage dealt, effective healing, or confirmed item consumption.

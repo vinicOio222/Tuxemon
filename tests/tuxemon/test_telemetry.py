@@ -243,6 +243,62 @@ def test_end_combat_retries_failed_telemetry_write(tmp_path, monster, monkeypatc
     ]
 
 
+def test_escape_saves_telemetry_before_session_reset(tmp_path, monster):
+    state = MagicMock(spec=CombatState)
+    state.telemetry_recorder = TelemetryRecorder(output_dir=tmp_path)
+    state.telemetry_outcome = None
+    state.telemetry_saved = False
+    state.telemetry_final_snapshot_recorded = False
+    state.telemetry_end_recorded = False
+    variables = {"run": True}
+    monster.end_combat = MagicMock()
+    state.session = MagicMock()
+    state.ai_manager = MagicMock()
+    state.combat_session = SimpleNamespace(
+        turn=3,
+        players=[SimpleNamespace(monsters=[monster])],
+        get_variable=variables.get,
+    )
+    state._save_battle_telemetry = lambda outcome: (
+        CombatState._save_battle_telemetry(state, outcome)
+    )
+
+    CombatState._on_clean_combat(state)
+
+    path = tmp_path / f"{state.telemetry_recorder.battle_id}.jsonl"
+    events = [json.loads(line) for line in path.read_text().splitlines()]
+    assert [event["event_type"] for event in events] == [
+        "monster_snapshot",
+        "battle_ended",
+    ]
+    assert events[0]["turn"] == 3
+    assert events[1]["data"]["outcome"] == "escaped"
+    assert state.telemetry_saved is True
+
+
+def test_switch_flags_forced_entries_and_keeps_outgoing_monster(tmp_path, monster):
+    recorder = TelemetryRecorder(output_dir=tmp_path)
+    fainted = monster
+    fainted.current_hp = 0
+    incoming = SimpleNamespace(
+        slug="agnite", instance_id=uuid4(), owner=None, is_fainted=False
+    )
+    voluntary_out = SimpleNamespace(
+        slug="cataspike", instance_id=uuid4(), owner=None, is_fainted=False
+    )
+
+    after_faint = recorder.record_switch(3, incoming, fainted)
+    voluntary = recorder.record_switch(4, incoming, voluntary_out)
+    replacement = recorder.record_switch(5, incoming)
+
+    assert after_faint.event_type == TelemetryEventType.SWITCH
+    assert after_faint.data["outgoing"] == "test_monster"
+    assert after_faint.data["forced"] is True
+    assert voluntary.data["forced"] is False
+    assert replacement.data["outgoing"] is None
+    assert replacement.data["forced"] is True
+
+
 def test_rewards_record_health_and_level_before_and_after(
     tmp_path, monster, monkeypatch
 ):

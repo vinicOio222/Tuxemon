@@ -87,6 +87,9 @@ class CaptureEffect(CoreEffect):
         ):
             target.status.clear_status(self.session)
         target.set_acquisition(Acquisition.CAPTURED)
+        # Detach from the wild owner first; add_monster reassigns the owner.
+        if target.owner is not None:
+            target.owner.party.remove_monster(target)
         self.session.player.party.add_monster(
             target, len(self.session.player.monsters)
         )

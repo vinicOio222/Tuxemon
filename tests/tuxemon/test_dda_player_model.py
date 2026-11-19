@@ -72,6 +72,53 @@ def test_model_uses_combat_snapshots_not_reward_snapshot(outcome):
     assert indicators.recent[0].health_phase == "final"
 
 
+def test_captured_monster_moving_to_player_team_is_not_an_error():
+    model = PlayerModel()
+    battle_id = "capture-battle"
+
+    def observe(event_type, turn, data):
+        model.observe(TelemetryEvent(event_type, battle_id, turn, data))
+
+    def monster(instance_id, owner, is_player, hp):
+        return {
+            "instance_id": instance_id,
+            "owner_instance_id": owner,
+            "is_player": is_player,
+            "current_hp": hp,
+            "max_hp": 10,
+            "fainted": hp == 0,
+        }
+
+    observe(TelemetryEventType.BATTLE_STARTED, 0, {})
+    observe(
+        TelemetryEventType.MONSTER_SNAPSHOT,
+        1,
+        {
+            "snapshot_phase": "decision",
+            "monsters": [
+                monster("player-mon", "player", True, 10),
+                monster("wild-mon", "wild", False, 10),
+            ],
+        },
+    )
+    observe(
+        TelemetryEventType.MONSTER_SNAPSHOT,
+        2,
+        {
+            "snapshot_phase": "final",
+            "monsters": [
+                monster("player-mon", "player", True, 10),
+                monster("wild-mon", "player", True, 4),
+            ],
+        },
+    )
+    observe(TelemetryEventType.BATTLE_ENDED, 2, {"outcome": "win"})
+
+    indicators = model.get_indicators()
+    assert indicators.sample_size == 1
+    assert indicators.recent[0].outcome == "win"
+
+
 def test_recorder_delivers_events_to_player_model():
     model = PlayerModel()
     recorder = TelemetryRecorder(on_event=model.observe)

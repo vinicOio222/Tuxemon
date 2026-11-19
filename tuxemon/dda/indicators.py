@@ -60,9 +60,16 @@ def calculate_combat_indicators(
     baseline, observed = index(initial), index(current)
     if baseline.keys() != observed.keys():
         raise ValueError("Roster changes are not supported")
+    
+    def captured(key: str) -> bool:
+        """A wild monster moving to the player's team is a capture, not an ownership error."""
+        return not baseline[key]["is_player"] and observed[key]["is_player"]
+
     if any(
-        baseline[key]["owner_instance_id"] != observed[key]["owner_instance_id"]
-        or baseline[key]["is_player"] != observed[key]["is_player"]
+        not captured(key) and (
+            baseline[key]["owner_instance_id"] != observed[key]["owner_instance_id"]
+            or baseline[key]["is_player"] != observed[key]["is_player"]
+        )
         for key in baseline
     ):
         raise ValueError("Monster ownership changed")

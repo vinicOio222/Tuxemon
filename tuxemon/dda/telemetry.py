@@ -167,6 +167,29 @@ class TelemetryRecorder:
             TelemetryEventType.ACTION,
             turn, action_data.to_dict()
         )
+
+    def record_switch(
+        self,
+        turn: int,
+        incoming: Monster,
+        outgoing: Monster | None = None,
+    ) -> TelemetryEvent:
+        """Records a monster entering play. Without an outgoing monster,
+        the entry replaces a defeated one, so it is forced."""
+
+        return self.record(
+            TelemetryEventType.SWITCH,
+            turn,
+            {
+                "incoming": self._entity_slug(incoming),
+                "incoming_instance_id": self._entity_id(incoming),
+                "incoming_owner_instance_id": self._user_owner_id(incoming),
+                "incoming_is_player": self._is_user_player(incoming),
+                "outgoing": self._entity_slug(outgoing),
+                "outgoing_instance_id": self._entity_id(outgoing),
+                "forced": outgoing is None or outgoing.is_fainted,
+            },
+        )
         
     def record_monsters(
         self,
