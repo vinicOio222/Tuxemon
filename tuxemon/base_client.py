@@ -20,6 +20,7 @@ from tuxemon.constants import paths
 from tuxemon.core.active_effect import ActiveEffectManager
 from tuxemon.core.asset import init_assets
 from tuxemon.dda.player_model import PlayerModel
+from tuxemon.dda.telemetry import TelemetryExporter
 from tuxemon.economy.shop_manager import ShopManager
 from tuxemon.encounter import EncounterManager
 from tuxemon.environment import EnvironmentManager
@@ -196,6 +197,7 @@ class BaseClient(ABC):
 
         # Initialize the DDA player model for tracking player performance.
         self.dda_player_model = PlayerModel(window=10)
+        self.telemetry_exporter = TelemetryExporter()
 
         if self.config.cli:
             local_session.set_client(self)
@@ -222,6 +224,16 @@ class BaseClient(ABC):
 
     def perform_cleanup(self) -> None:
         """Handles necessary cleanup before shutting down."""
+        from tuxemon.states.combat_state import CombatState
+
+        # Finalize telemetry for any active combat states before cleanup.
+        try:
+            for state in self.state_manager.active_states:
+                if isinstance(state, CombatState):
+                    state.finalize_telemetry()
+        finally:
+            self.telemetry_exporter.close()
+
         self.map_loader.clear_cache()
         self.current_music.stop()
         self.event_bus.reset_all_events()

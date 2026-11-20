@@ -8,7 +8,8 @@ Note: this project requires Python 3.10+.
 """
 import os
 import sys
-from cx_Freeze import setup, Executable
+
+from cx_Freeze import Executable, setup
 
 # required so that the tuxemon folder can be found
 # when run from the buildconfig folder

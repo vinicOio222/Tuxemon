@@ -70,50 +70,53 @@ interfaces.
 - [x] Inspect a real victory log with the corrected phases.
 - [x] Validate real item-use log (potion, outcome `win`, no ordering or ID errors).
 - [x] Validate real defeat, escape, and switching logs (forced switch in `a29b2add`).
-- [ ] Define a versioned event contract and document optional fields.
-- [ ] Define actions as execution attempts; do not confuse them with hits,
+- [x] Define a [versioned event contract](./docs/events.md) and document nullable fields.
+- [x] Define actions as execution attempts; do not confuse them with hits,
 	damage dealt, effective healing, or confirmed item consumption.
-- [ ] Identify the item user's team by trainer ID; do not rely only on the
-	target's owner, who may receive an opponent's action.
-- [ ] Provide in-memory observations to the controller during battle,
-	without waiting for the JSONL file written at the end.
-- [ ] Ensure recorded data is isolated: later payload mutations must not
-	change earlier observations.
-- [ ] Harden writing: prevent truncation on repeated writes, partial files,
-	silent data loss on failure, and unsafe use of IDs as paths.
-- [ ] Bound memory/history and handle aborted battles or game shutdown
-	without blocking combat or duplicating final events.
+- [x] Record the acting trainer ID and team for item actions, independently of
+	the target's owner.
+- [x] Deliver observations in memory to the player model during battle,
+	without waiting for JSONL export. Controller integration belongs to section 5.
+- [x] Isolate stored events from mutations to the input payload and to events
+	delivered to the consumer or returned to the caller.
+- [x] Harden writing: preserve previous exports on failure, append without
+	duplicating pending events, reject unsafe IDs, and report export errors.
+- [x] Bound buffered events and recent battle history; handle interrupted
+	battles and graceful shutdown without disk writes on the combat loop
+	or duplicate final events. Mark incomplete JSONL exports explicitly.
 
 Completion: a stable contract, coverage of in-scope scenarios, and telemetry
 failures that do not change combat logic or prevent the battle from continuing.
 
 ## 2. Indicators: Next Step
 
-- [ ] Create CombatIndicators and an extractor with typed inputs and outputs.
-- [ ] Fix the initial baseline per battle and separate teams by identity,
+- [x] Create CombatIndicators and an extractor with typed inputs and outputs.
+- [x] Fix the initial baseline per battle and separate teams by identity,
 	never by list order or species slug alone.
-- [ ] Define baseline membership; monsters already fainted at the start
+- [x] Define baseline membership; monsters already fainted at the start
 	do not count as new defeats or available resources.
-- [ ] Calculate each team's health reserve: total current HP / total maximum
+- [x] Calculate each team's health reserve: total current HP / total maximum
 	HP of baseline members, retaining newly fainted members in the denominator.
-- [ ] Calculate availability: initially fit members still fit /
+- [x] Calculate availability: initially fit members still fit /
 	initially fit members.
-- [ ] Calculate level advantage from the initially fit teams and define
-	a justified normalization; level does not represent overall strength.
+- [ ] Consider level advantage later; level does not represent overall strength,
+	and a normalization must be justified before including it.
 - [ ] Handle empty teams, zero maximum HP, missing data, unknown owners,
 	duplicate IDs, and inconsistent values without NaN or misleading inference.
 - [ ] Distinguish decision, reward, and final phases; before_rewards occurs
 	per reward application, not necessarily only at the end of the battle.
 - [ ] Separate reward-induced HP/level changes from combat changes.
 	Net HP change is not equivalent to damage per action.
-- [ ] Define how to handle added/removed members and maximum HP changes
+- [x] Define how to handle added/removed members and maximum HP changes
 	during battle while preserving an interpretable baseline.
 - [ ] Reuse the extractor for live processing and offline JSONL replay.
 - [ ] Test known calculations, asymmetric teams, repeated species,
 	initially fainted members, rewards, and incomplete inputs.
 
 Completion: identical events produce identical live/offline indicators,
-with documented units, denominators, and bounds.
+with documented units, denominators, and bounds. See the [indicator
+contract](./docs/indicators.md). Current values include reward effects; pure
+combat-only changes and an offline replay tool remain future work.
 
 ## 3. Analyze: Fuzzy Inference
 

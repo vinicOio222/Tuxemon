@@ -195,10 +195,10 @@ class CombatState(CombatAnimations):
         self.combat_session.set_combat_type(context.combat_type)
         self.combat_session.set_battle_format(context.is_double_battle)
         self.combat_session.set_players(context.teams)
-        
+
         # Flags to track telemetry recording status
         self.telemetry_outcome: str | None = None
-        self.telemetry_saved = False
+        self.telemetry_export_queued = False
         self.telemetry_final_snapshot_recorded = False
         self.telemetry_end_recorded = False
 
@@ -214,7 +214,7 @@ class CombatState(CombatAnimations):
             combat_type=context.combat_type.value,
             battle_mode=context.battle_mode.value
         )
-        
+
         self._lock_update = self.client.config.combat_click_to_continue
         self.create_combat_dialog()
         self.transition_phase(CombatPhase.BEGIN)
@@ -327,7 +327,7 @@ class CombatState(CombatAnimations):
             self.event_bus.publish("status_applied")
             self.event_bus.publish("update_party_hud")
             c_session.check_decisions(self.session)
-            
+
             # Record the state of all monsters at the start of the decision phase
             record_telemetry(
                 self.telemetry_recorder.record_monsters,
@@ -606,28 +606,33 @@ class CombatState(CombatAnimations):
 
     def _player_battle_outcome(self) -> str:
         """Determines the outcome of the battle for the player"""
-        
+
         if self.session.player in self.combat_session.remaining_players:
             return "win"
         if self.session.player in self.combat_session.defeated_players:
             return "loss"
         return "unknown"
 
-    def _save_battle_telemetry(self, outcome: str) -> None:
-        """Saves the battle telemetry if it hasn't been saved already."""
-        
-        if self.telemetry_saved:
+    def _save_battle_telemetry(
+        self, outcome: str, *, aborted: bool = False
+    ) -> None:
+        """Finalize telemetry and queue the battle for export once."""
+
+        if self.telemetry_export_queued:
             return
 
-        # Ensure the telemetry outcome is set and consistent
-        if self.telemetry_outcome is None:
+        if self.telemetry_outcome is not None:
+            outcome = self.telemetry_outcome
+            aborted = False
+        elif not aborted:
             self.telemetry_outcome = outcome
-        outcome = self.telemetry_outcome
 
-        # Record the final snapshot of the battle
-        # telemetry if it hasn't been recorded yet
-        if not self.telemetry_final_snapshot_recorded:
-            success = record_telemetry(
+        if not (
+            aborted
+            or self.telemetry_end_recorded
+            or self.telemetry_final_snapshot_recorded
+        ):
+            self.telemetry_final_snapshot_recorded = record_telemetry(
                 self.telemetry_recorder.record_monsters,
                 turn=self.combat_session.turn,
                 monsters=[
@@ -637,24 +642,31 @@ class CombatState(CombatAnimations):
                 ],
                 snapshot_phase=SnapshotPhase.FINAL,
             )
-            if not success:
-                return
-            self.telemetry_final_snapshot_recorded = True
 
-        # Record the end of the battle
-        # telemetry if it hasn't been recorded yet
         if not self.telemetry_end_recorded:
-            success = record_telemetry(
-               self.telemetry_recorder.record_battle_end,
-               self.combat_session.turn,
-               outcome,
+            self.telemetry_end_recorded = record_telemetry(
+                self.telemetry_recorder.record_battle_end,
+                self.combat_session.turn,
+                outcome,
+                aborted=aborted,
             )
-            if not success:
+            if not self.telemetry_end_recorded:
                 return
-            self.telemetry_end_recorded = True
 
-        if record_telemetry(self.telemetry_recorder.write):
-            self.telemetry_saved = True
+        self.telemetry_export_queued = record_telemetry(
+            self.client.telemetry_exporter.submit, self.telemetry_recorder
+        )
+
+    def finalize_telemetry(self) -> None:
+        """Close a battle that is ending or leaving the state stack."""
+        outcome = self.telemetry_outcome
+        self._save_battle_telemetry(
+            outcome or "unknown", aborted=outcome is None
+        )
+
+    def shutdown(self) -> None:
+        self.finalize_telemetry()
+        super().shutdown()
 
     def process_player_decisions(self) -> None:
         """
@@ -1195,12 +1207,8 @@ class CombatState(CombatAnimations):
     def end_combat(self) -> None:
         """End the combat."""
 
-        # Save battle telemetry if it hasn't been
-        # saved yet and an outcome is available
-        if not self.telemetry_saved and self.telemetry_outcome is not None:
-            self._save_battle_telemetry(self.telemetry_outcome)
-
         self.event_bus.publish("clean_combat")
+        self.finalize_telemetry()
         for player in self.combat_session.players:
             player.battle_last_used_item_slug = None
         self.combat_session.reset()
@@ -1281,7 +1289,7 @@ class CombatState(CombatAnimations):
     def _on_clean_combat(self) -> None:
         # Escapes reset the combat session before the RAN_AWAY phase runs, so
         # the final telemetry must be saved here while turn and players exist.
-        if not self.telemetry_saved and self.combat_session.get_variable("run"):
+        if self.combat_session.get_variable("run"):
             self._save_battle_telemetry("escaped")
 
         for player in self.combat_session.players:

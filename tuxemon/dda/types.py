@@ -1,40 +1,47 @@
+"""Types and data structures for the Tuxemon battle telemetry system.
+
+This module defines enums and data classes used to represent various aspects of the battle telemetry system,
+including snapshot phases, telemetry event types, outcomes, action types, and structured representations
+of actions, monster snapshots, battle records, and telemetry events.
+
+All enums provide a `members` static method that returns the set of valid string values for that enum.
+"""
+
 from __future__ import annotations
 
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from dataclasses import asdict, dataclass, field
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from tuxemon.dda.indicators import CombatIndicators
 
 
-TELEMETRY_SCHEMA_VERSION = "1.0.0"
+TELEMETRY_SCHEMA_VERSION: str = "0.1.1"
 
 
 # Enums
+# Enums for snapshot phases, telemetry event types, outcomes, and action types.
+# --------------------------------------------------
 class SnapshotPhase(str, Enum):
-    """Enumeration of snapshot phases in a battle."""
-    
     DECISION = "decision"
     BEFORE_REWARDS = "before_rewards"
     AFTER_REWARDS = "after_rewards"
     FINAL = "final"
-    
+
     @staticmethod
     def members() -> set[str]:
         return {phase.value for phase in SnapshotPhase}
-    
+
 
 class TelemetryEventType(str, Enum):
-    """Enumeration of telemetry event types."""
-    
     ACTION = "action"
     BATTLE_ENDED = "battle_ended"
     BATTLE_STARTED = "battle_started"
     MONSTER_SNAPSHOT = "monster_snapshot"
     SWITCH = "switch"
-    
+
     @staticmethod
     def members() -> set[str]:
         return {
@@ -44,22 +51,18 @@ class TelemetryEventType(str, Enum):
 
 
 class OutcomesType(str, Enum):
-    """Enumeration of possible battle outcomes."""
-    
     WIN = "win"
     LOSS = "loss"
     DRAW = "draw"
     ESCAPED = "escaped"
     UNKNOWN = "unknown"
-    
+
     @staticmethod
     def members() -> set[str]:
         return {outcome.value for outcome in OutcomesType}
 
 
 class ActionType(str, Enum):
-    """Enumeration of action types."""
-
     ITEM = "item"
     STATUS = "status"
     TECHNIQUE = "technique"
@@ -71,6 +74,8 @@ class ActionType(str, Enum):
 
 
 # Data Classes
+# Data classes for representing actions, monster snapshots, battle records, and telemetry events.
+# --------------------------------------------------
 @dataclass(frozen=True)
 class ActionData:
     """A structured representation of an action taken by a monster."""
@@ -92,7 +97,7 @@ class ActionData:
 @dataclass(frozen=True)
 class MonsterSnapshotData:
     """A structured representation of a monster's state."""
-    
+
     owner_slug: str | None
     owner_instance_id: str | None
     is_player: bool | None
@@ -104,7 +109,7 @@ class MonsterSnapshotData:
     hp_ratio: float
     fainted: bool
     statuses: list[str] = field(default_factory=list)
-    
+
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
@@ -112,7 +117,7 @@ class MonsterSnapshotData:
 @dataclass(frozen=True)
 class BattleRecord:
     """A record of a battle's outcome and relevant statistics."""
-    
+
     battle_id: str
     turns: int
     health_phase: str
@@ -120,23 +125,18 @@ class BattleRecord:
     player_fainted: int
     opponents_fainted: int
     outcome: str | None = None
-    
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
-    
+
 
 @dataclass(frozen=True)
 class PlayerIndicators:
     """Aggregated indicators of the player's performance over recent battles."""
-    
-    current: BattleRecord | None
+
+    current: BattleRecord | None = None
     sample_size: int
-    average_turns: float | None
+    average_turns: float | None = None
     recent: tuple[BattleRecord, ...] = field(default_factory=tuple)
     outcomes: dict[str, int] = field(default_factory=dict)
-    
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+    unavailable_reason: str | None = None
 
 
 @dataclass(frozen=True)

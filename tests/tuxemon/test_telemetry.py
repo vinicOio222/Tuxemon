@@ -1,13 +1,16 @@
 import json
 from datetime import datetime, timezone
+from threading import Event
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
 
+from tuxemon.base_client import BaseClient
 from tuxemon.combat.machine import CombatPhase
-from tuxemon.dda.telemetry import TelemetryRecorder
+from tuxemon.dda.player_model import PlayerModel
+from tuxemon.dda.telemetry import TelemetryExporter, TelemetryRecorder
 from tuxemon.dda.types import OutcomesType, TelemetryEventType
 from tuxemon.monster.monster import Monster
 from tuxemon.monster.stats import BasicStats
@@ -171,8 +174,11 @@ def test_battle_end_writes_final_snapshot_once(tmp_path, monster):
         players=[SimpleNamespace(monsters=[monster])],
     )
     state.telemetry_recorder = TelemetryRecorder(output_dir=tmp_path)
+    state.client = SimpleNamespace(
+        telemetry_exporter=SimpleNamespace(submit=lambda recorder: recorder.write())
+    )
     state.telemetry_outcome = None
-    state.telemetry_saved = False
+    state.telemetry_export_queued = False
     state.telemetry_final_snapshot_recorded = False
     state.telemetry_end_recorded = False
 
@@ -188,15 +194,15 @@ def test_battle_end_writes_final_snapshot_once(tmp_path, monster):
     assert events[0]["data"]["snapshot_phase"] == "final"
     assert events[0]["data"]["monsters"][0]["current_hp"] == 10
     assert events[1]["data"]["outcome"] == "win"
-    assert state.telemetry_saved is True
+    assert state.telemetry_export_queued is True
 
 
-def test_end_combat_retries_failed_telemetry_write(tmp_path, monster, monkeypatch):
+def test_end_combat_retries_rejected_telemetry_export(tmp_path, monster):
     state = MagicMock(spec=CombatState)
     recorder = TelemetryRecorder(output_dir=tmp_path)
     state.telemetry_recorder = recorder
     state.telemetry_outcome = "win"
-    state.telemetry_saved = False
+    state.telemetry_export_queued = False
     state.telemetry_final_snapshot_recorded = False
     state.telemetry_end_recorded = False
     player = SimpleNamespace(
@@ -209,31 +215,31 @@ def test_end_combat_retries_failed_telemetry_write(tmp_path, monster, monkeypatc
     state.client = MagicMock()
     state.unregister_event_handlers = MagicMock()
     state.clear_combat_states = MagicMock()
-    state._save_battle_telemetry = lambda outcome: (
-        CombatState._save_battle_telemetry(state, outcome)
+    state._save_battle_telemetry = lambda *args, **kwargs: (
+        CombatState._save_battle_telemetry(state, *args, **kwargs)
     )
+    state.finalize_telemetry.side_effect = lambda: CombatState.finalize_telemetry(state)
     state._captured_mon_is_new = False
     state._captured_mon = None
 
-    original_write = recorder.write
     attempts = 0
 
-    def fail_once(output_path=None):
+    def fail_once(pending):
         nonlocal attempts
         attempts += 1
         if attempts == 1:
-            raise OSError("temporary write failure")
-        return original_write(output_path)
+            raise RuntimeError("Telemetry export queue full")
+        pending.write()
 
-    monkeypatch.setattr(recorder, "write", fail_once)
+    state.client.telemetry_exporter.submit.side_effect = fail_once
 
     CombatState._save_battle_telemetry(state, "win")
-    assert not state.telemetry_saved
+    assert not state.telemetry_export_queued
     assert len(recorder.events) == 2
 
     CombatState.end_combat(state)
 
-    assert state.telemetry_saved
+    assert state.telemetry_export_queued
     assert attempts == 2
     output_path = tmp_path / f"{recorder.battle_id}.jsonl"
     events = [json.loads(line) for line in output_path.read_text().splitlines()]
@@ -246,8 +252,11 @@ def test_end_combat_retries_failed_telemetry_write(tmp_path, monster, monkeypatc
 def test_escape_saves_telemetry_before_session_reset(tmp_path, monster):
     state = MagicMock(spec=CombatState)
     state.telemetry_recorder = TelemetryRecorder(output_dir=tmp_path)
+    state.client = SimpleNamespace(
+        telemetry_exporter=SimpleNamespace(submit=lambda recorder: recorder.write())
+    )
     state.telemetry_outcome = None
-    state.telemetry_saved = False
+    state.telemetry_export_queued = False
     state.telemetry_final_snapshot_recorded = False
     state.telemetry_end_recorded = False
     variables = {"run": True}
@@ -273,7 +282,136 @@ def test_escape_saves_telemetry_before_session_reset(tmp_path, monster):
     ]
     assert events[0]["turn"] == 3
     assert events[1]["data"]["outcome"] == "escaped"
-    assert state.telemetry_saved is True
+    assert state.telemetry_export_queued is True
+
+
+@pytest.mark.parametrize(
+    "battle_id",
+    [
+        pytest.param("../escape", id="parent-posix"),
+        pytest.param(r"..\escape", id="parent-windows"),
+        pytest.param("C:drive", id="drive-relative"),
+        pytest.param("NUL", id="reserved-device"),
+    ],
+)
+def test_recorder_rejects_unsafe_battle_ids(tmp_path, battle_id):
+    with pytest.raises(ValueError, match="Unsafe telemetry battle ID"):
+        TelemetryRecorder(battle_id, output_dir=tmp_path)
+
+
+def test_failed_atomic_append_preserves_file_and_pending_events(tmp_path, monkeypatch):
+    recorder = TelemetryRecorder(output_dir=tmp_path)
+    recorder.record_battle_start(0, "trainer", "single")
+    path = recorder.write()
+    before = path.read_bytes()
+    recorder.record_battle_end(1, "win")
+
+    def fail_replace(source, destination):
+        assert destination == path
+        assert len(source.read_text().splitlines()) == 2
+        raise OSError("disk unavailable")
+
+    with monkeypatch.context() as patch:
+        patch.setattr("tuxemon.dda.telemetry.os.replace", fail_replace)
+        with pytest.raises(OSError, match="disk unavailable"):
+            recorder.write()
+
+    assert path.read_bytes() == before
+    assert list(tmp_path.iterdir()) == [path]
+    recorder.write()
+    recorder.write()
+    assert [json.loads(line)["event_type"] for line in path.read_text().splitlines()] == [
+        "battle_started",
+        "battle_ended",
+    ]
+
+
+def test_buffer_preserves_final_records_and_reports_drops(tmp_path, caplog):
+    observed = []
+    recorder = TelemetryRecorder(
+        output_dir=tmp_path, on_event=observed.append, max_events=4
+    )
+    recorder.record_battle_start(0, "trainer", "single")
+    for turn in range(1, 4):
+        recorder.record_monsters(turn, [])
+    recorder.record_monsters(4, [], snapshot_phase="final")
+    recorder.record_battle_end(4, "win")
+    recorder.record_battle_end(4, "loss")
+
+    assert len(recorder.events) == 4
+    assert len(observed) == 6
+    events = [json.loads(line) for line in recorder.write().read_text().splitlines()]
+    assert [event["turn"] for event in events] == [0, 1, 4, 4]
+    assert events[2]["data"]["snapshot_phase"] == "final"
+    assert events[3]["data"] == {"outcome": "win", "dropped_events": 2}
+    assert caplog.text.count("JSONL will be incomplete") == 1
+
+
+def test_game_cleanup_exports_an_interrupted_battle_once(tmp_path):
+    client = MagicMock()
+    client.telemetry_exporter = TelemetryExporter()
+    model = PlayerModel()
+    state = MagicMock(spec=CombatState)
+    state.client = client
+    state.combat_session = SimpleNamespace(turn=2)
+    state.telemetry_recorder = TelemetryRecorder(
+        output_dir=tmp_path, on_event=model.observe
+    )
+    state.telemetry_outcome = None
+    state.telemetry_export_queued = False
+    state.telemetry_final_snapshot_recorded = False
+    state.telemetry_end_recorded = False
+    state.telemetry_recorder.record_battle_start(0, "trainer", "single")
+    state._save_battle_telemetry.side_effect = lambda *args, **kwargs: (
+        CombatState._save_battle_telemetry(state, *args, **kwargs)
+    )
+    state.finalize_telemetry.side_effect = lambda: CombatState.finalize_telemetry(state)
+    client.state_manager.active_states = [state, MagicMock()]
+
+    BaseClient.perform_cleanup(client)
+    state.finalize_telemetry()
+
+    path = tmp_path / f"{state.telemetry_recorder.battle_id}.jsonl"
+    events = [json.loads(line) for line in path.read_text().splitlines()]
+    assert [event["event_type"] for event in events] == [
+        "battle_started",
+        "battle_ended",
+    ]
+    assert events[-1]["turn"] == 2
+    assert events[-1]["data"] == {"outcome": "unknown", "aborted": True}
+    assert model.get_indicators().sample_size == 0
+
+
+def test_exporter_retries_write_without_waiting_in_submit(tmp_path, monkeypatch):
+    recorder = TelemetryRecorder(output_dir=tmp_path)
+    recorder.record_battle_end(1, "win")
+    exporter = TelemetryExporter()
+    started = Event()
+    release = Event()
+    write = recorder.write
+    attempts = 0
+
+    def block_then_fail():
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            started.set()
+            if not release.wait(timeout=5):
+                raise TimeoutError("submit did not release the game loop")
+            raise OSError("temporary write failure")
+        return write()
+
+    monkeypatch.setattr(recorder, "write", block_then_fail)
+    try:
+        exporter.submit(recorder)
+        assert started.wait(timeout=5)
+        assert attempts == 1
+        assert not list(tmp_path.iterdir())
+    finally:
+        release.set()
+        exporter.close()
+    assert attempts == 2
+    assert json.loads(write().read_text())["data"] == {"outcome": "win"}
 
 
 def test_switch_flags_forced_entries_and_keeps_outgoing_monster(tmp_path, monster):
