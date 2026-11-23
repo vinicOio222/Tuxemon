@@ -78,6 +78,9 @@ class GameplayConfig(BaseModel):
     sound_volume: float = 0.2
     music_volume: float = 0.5
     combat_click_to_continue: bool = False
+    dda_telemetry_export: bool = (
+        False  # Enable exporting DDA telemetry for analysis
+    )
 
     @field_validator("sound_volume", "music_volume")
     def validate_volume(cls, v: float) -> float:
@@ -299,6 +302,10 @@ class TuxemonConfig:
         return self.config_model.gameplay.combat_click_to_continue
 
     @property
+    def dda_telemetry_export(self) -> bool:
+        return self.config_model.gameplay.dda_telemetry_export
+
+    @property
     def dialog_box_style(self) -> str:
         return self.config_model.graphics.dialog_box_style
 
@@ -477,6 +484,7 @@ class LocaleConfig:
     def minimal_font_file(self) -> str:
         return self._model.minimal_font_file
 
+
 class InputConfig:
     """Reactive input configuration wrapper with cached keymap."""
 
@@ -622,6 +630,11 @@ class LoggingConfig:
 
             if self.log_to_file:
                 self._setup_file_logging(logger, formatter, log_level)
+
+        # A root handler stops Python from printing unformatted warnings
+        # (lastResort) and from installing basicConfig for other modules.
+        if "all" not in self.loggers:
+            logging.getLogger().addHandler(logging.NullHandler())
 
         logging.getLogger("orthographic").setLevel(logging.ERROR)
 

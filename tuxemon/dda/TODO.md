@@ -101,22 +101,25 @@ failures that do not change combat logic or prevent the battle from continuing.
 	initially fit members.
 - [ ] Consider level advantage later; level does not represent overall strength,
 	and a normalization must be justified before including it.
-- [ ] Handle empty teams, zero maximum HP, missing data, unknown owners,
+- [x] Handle empty teams, zero maximum HP, missing data, unknown owners,
 	duplicate IDs, and inconsistent values without NaN or misleading inference.
-- [ ] Distinguish decision, reward, and final phases; before_rewards occurs
-	per reward application, not necessarily only at the end of the battle.
-- [ ] Separate reward-induced HP/level changes from combat changes.
+- [x] Distinguish decision, reward, and final phases: the combat indicators are
+	frozen at the first before_rewards snapshot; after_rewards and final only
+	update the phase and turn.
+- [x] Separate reward-induced HP/level changes from combat changes.
 	Net HP change is not equivalent to damage per action.
 - [x] Define how to handle added/removed members and maximum HP changes
 	during battle while preserving an interpretable baseline.
-- [ ] Reuse the extractor for live processing and offline JSONL replay.
-- [ ] Test known calculations, asymmetric teams, repeated species,
+- [x] Reuse the extractor for live processing and offline JSONL replay; the
+	replay test feeds JSONL through the same player model and compares results.
+- [x] Test known calculations, asymmetric teams, captures, ownership changes,
 	initially fainted members, rewards, and incomplete inputs.
 
 Completion: identical events produce identical live/offline indicators,
 with documented units, denominators, and bounds. See the [indicator
-contract](./docs/indicators.md). Current values include reward effects; pure
-combat-only changes and an offline replay tool remain future work.
+contract](./docs/indicators.md). Combat indicators are frozen at the first
+before_rewards snapshot, so reward effects are excluded. A standalone offline
+replay tool remains future work.
 
 ## 3. Analyze: Fuzzy Inference
 
@@ -141,8 +144,10 @@ the game.
 
 ## 4. Knowledge: Configuration and History
 
-- [ ] Create a validated dda.yaml schema: version, modes, inputs, rules,
-	bounds, intervals, and eligible trainers.
+- [x] Per-campaign switch in `mods/<slug>/dda.yaml` (`version`, `enabled`;
+	missing or invalid means disabled), stored in the `dda_enabled` variable.
+- [ ] Extend dda.yaml with modes, inputs, rules, bounds, intervals, and
+	eligible trainers.
 - [ ] Separate immutable configuration from battle state and recent history.
 - [ ] Bound the history window and define resets between battles/sessions.
 - [ ] Record the configuration version used in each experiment.

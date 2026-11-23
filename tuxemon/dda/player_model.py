@@ -50,6 +50,7 @@ class PlayerModel:
         self._current: BattleRecord | None = None
         self._unavailable_reason: str | None = None
         self._roster_changed = False
+        self._combat_frozen = False
         self._last_turn = 0
         self._closed = True
 
@@ -57,8 +58,7 @@ class PlayerModel:
         self._current = None
         self._unavailable_reason = reason
         logger.error(
-            "Battle indicators unavailable for %s: %s",
-            self._battle_id, reason
+            "Battle indicators unavailable for %s: %s", self._battle_id, reason
         )
 
     def observe(self, event: TelemetryEvent) -> None:
@@ -85,12 +85,14 @@ class PlayerModel:
             row.battle_id == event.battle_id for row in self._recent
         ):
             return
+
         self._battle_id = event.battle_id
         self._baseline = None
         self._fainted.clear()
         self._current = None
         self._unavailable_reason = None
         self._roster_changed = False
+        self._combat_frozen = False
         self._last_turn = event.turn
         self._closed = False
 
@@ -105,15 +107,29 @@ class PlayerModel:
         if self._roster_changed:
             return
 
+        phase = event.data.get("snapshot_phase")
+        if self._combat_frozen:
+            # Rewards are applied after combat; keep the pre-reward indicators.
+            if self._current is not None:
+                self._current = replace(
+                    self._current, turns=event.turn, health_phase=phase
+                )
+            return
+        if phase == SnapshotPhase.BEFORE_REWARDS:
+            self._combat_frozen = True
+
         # Attempt to calculate combat indicators based on the current snapshot and the baseline.
         try:
             baseline = self._baseline
             if baseline is None:
                 if (
                     event.turn != 1
-                    or event.data.get("snapshot_phase") != SnapshotPhase.DECISION
+                    or event.data.get("snapshot_phase")
+                    != SnapshotPhase.DECISION
                 ):
-                    raise ValueError("The first snapshot must be turn 1 decision")
+                    raise ValueError(
+                        "The first snapshot must be turn 1 decision"
+                    )
                 baseline = event
             assessment = calculate_combat_indicators(baseline, event)
         except ValueError as error:
@@ -138,7 +154,8 @@ class PlayerModel:
         }
 
         self._fainted.update(
-            member["instance_id"] for member in event.data["monsters"]
+            member["instance_id"]
+            for member in event.data["monsters"]
             if member["fainted"] and member["instance_id"] in initially_fit
         )
 
@@ -147,9 +164,7 @@ class PlayerModel:
             turns=event.turn,
             combat=combat,
             health_phase=event.data["snapshot_phase"],
-            player_fainted=sum(
-                initially_fit[key] for key in self._fainted
-            ),
+            player_fainted=sum(initially_fit[key] for key in self._fainted),
             opponents_fainted=sum(
                 not initially_fit[key] for key in self._fainted
             ),
@@ -190,11 +205,7 @@ class PlayerModel:
             self._closed = True
             return
 
-        completed = replace(
-            self._current,
-            outcome=outcome,
-            turns=event.turn
-        )
+        completed = replace(self._current, outcome=outcome, turns=event.turn)
         self._current = completed
         self._recent.append(completed)
         self._closed = True
@@ -203,16 +214,15 @@ class PlayerModel:
         # Creates as dict representation of the current and recent
         # battle records, along with aggregated statistics.
         outcomes = {
-            outcome: sum(
-                row.outcome == outcome for row in self._recent
-            )
+            outcome: sum(row.outcome == outcome for row in self._recent)
             for outcome in OutcomesType.members()
         }
 
         # Calculate the average number of turns across recent battles, if any.
         average_turns = (
             sum(row.turns for row in self._recent) / len(self._recent)
-            if self._recent else None
+            if self._recent
+            else None
         )
 
         return PlayerIndicators(

@@ -15,7 +15,7 @@ from tuxemon.dda.types import TelemetryEvent, TelemetryEventType
         pytest.param("loss", id="loss"),
     ],
 )
-def test_model_tracks_actual_health_through_reward_snapshots(outcome):
+def test_model_keeps_pre_reward_health_through_reward_snapshots(outcome):
     model = PlayerModel()
     battle_id = "test-battle"
 
@@ -61,7 +61,7 @@ def test_model_tracks_actual_health_through_reward_snapshots(outcome):
     after_rewards = model.get_indicators().current
     assert after_rewards is not None
     assert after_rewards.health_phase == "after_rewards"
-    assert after_rewards.combat.player_health == 1.0
+    assert after_rewards.combat.player_health == 0.6
     observe(
         TelemetryEventType.MONSTER_SNAPSHOT,
         2,
@@ -77,7 +77,7 @@ def test_model_tracks_actual_health_through_reward_snapshots(outcome):
     assert indicators.sample_size == 1
     assert indicators.outcomes[outcome] == 1
     assert indicators.recent[0].health_phase == "final"
-    assert indicators.recent[0].combat.player_health == 1.0
+    assert indicators.recent[0].combat.player_health == 0.6
 
 
 def test_captured_monster_moving_to_player_team_is_not_an_error():
@@ -254,7 +254,8 @@ def test_level_up_updates_resources_and_preserves_observed_faints():
     ]
     recorder.record_battle_start(0, "trainer", "single")
     recorder.record(
-        TelemetryEventType.MONSTER_SNAPSHOT, 1,
+        TelemetryEventType.MONSTER_SNAPSHOT,
+        1,
         {"snapshot_phase": "decision", "monsters": baseline},
     )
     defeated = [
@@ -262,18 +263,20 @@ def test_level_up_updates_resources_and_preserves_observed_faints():
         {**baseline[1], "current_hp": 0, "fainted": True},
     ]
     recorder.record(
-        TelemetryEventType.MONSTER_SNAPSHOT, 2,
+        TelemetryEventType.MONSTER_SNAPSHOT,
+        2,
         {"snapshot_phase": "before_rewards", "monsters": defeated},
     )
     after_level = [{**defeated[0], "current_hp": 7, "max_hp": 12}, defeated[1]]
     recorder.record(
-        TelemetryEventType.MONSTER_SNAPSHOT, 2,
+        TelemetryEventType.MONSTER_SNAPSHOT,
+        2,
         {"snapshot_phase": "after_rewards", "monsters": after_level},
     )
     current = model.get_indicators().current
     assert current is not None
     assert current.health_phase == "after_rewards"
-    assert current.combat.player_health == pytest.approx(7 / 12)
+    assert current.combat.player_health == pytest.approx(0.5)
     assert current.opponents_fainted == 1
 
 
@@ -293,15 +296,18 @@ def test_roster_change_remains_unavailable_even_if_roster_returns():
     ]
     recorder.record_battle_start(0, "trainer", "single")
     recorder.record(
-        TelemetryEventType.MONSTER_SNAPSHOT, 1,
+        TelemetryEventType.MONSTER_SNAPSHOT,
+        1,
         {"snapshot_phase": "decision", "monsters": monsters},
     )
     recorder.record(
-        TelemetryEventType.MONSTER_SNAPSHOT, 2,
+        TelemetryEventType.MONSTER_SNAPSHOT,
+        2,
         {"snapshot_phase": "decision", "monsters": monsters[:1]},
     )
     recorder.record(
-        TelemetryEventType.MONSTER_SNAPSHOT, 3,
+        TelemetryEventType.MONSTER_SNAPSHOT,
+        3,
         {"snapshot_phase": "final", "monsters": monsters},
     )
     recorder.record_battle_end(3, "win")
@@ -327,12 +333,14 @@ def test_invalid_health_clears_previous_result_and_valid_snapshot_recovers():
     ]
     recorder.record_battle_start(0, "trainer", "single")
     recorder.record(
-        TelemetryEventType.MONSTER_SNAPSHOT, 1,
+        TelemetryEventType.MONSTER_SNAPSHOT,
+        1,
         {"snapshot_phase": "decision", "monsters": monsters},
     )
     invalid = [{**monsters[0], "current_hp": -1}, monsters[1]]
     recorder.record(
-        TelemetryEventType.MONSTER_SNAPSHOT, 2,
+        TelemetryEventType.MONSTER_SNAPSHOT,
+        2,
         {"snapshot_phase": "decision", "monsters": invalid},
     )
     unavailable = model.get_indicators()
@@ -340,7 +348,8 @@ def test_invalid_health_clears_previous_result_and_valid_snapshot_recovers():
     assert unavailable.unavailable_reason == "Health outside valid bounds"
 
     recorder.record(
-        TelemetryEventType.MONSTER_SNAPSHOT, 3,
+        TelemetryEventType.MONSTER_SNAPSHOT,
+        3,
         {"snapshot_phase": "final", "monsters": monsters},
     )
     recorder.record_battle_end(3, "win")
@@ -371,16 +380,19 @@ def test_complete_jsonl_replay_matches_live_indicators(tmp_path):
     ]
     recorder.record_battle_start(0, "trainer", "single")
     recorder.record(
-        TelemetryEventType.MONSTER_SNAPSHOT, 1,
+        TelemetryEventType.MONSTER_SNAPSHOT,
+        1,
         {"snapshot_phase": "decision", "monsters": monsters},
     )
     after_level = [{**monsters[0], "current_hp": 8, "max_hp": 12}, monsters[1]]
     recorder.record(
-        TelemetryEventType.MONSTER_SNAPSHOT, 2,
+        TelemetryEventType.MONSTER_SNAPSHOT,
+        2,
         {"snapshot_phase": "after_rewards", "monsters": after_level},
     )
     recorder.record(
-        TelemetryEventType.MONSTER_SNAPSHOT, 2,
+        TelemetryEventType.MONSTER_SNAPSHOT,
+        2,
         {"snapshot_phase": "final", "monsters": after_level},
     )
     recorder.record_battle_end(2, "win")

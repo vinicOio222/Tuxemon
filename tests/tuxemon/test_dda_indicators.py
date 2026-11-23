@@ -90,22 +90,73 @@ def test_excludes_monsters_already_fainted_from_baseline():
     assert result.player_availability == 1
 
 
-def test_duplicate_ids_and_missing_owner_are_rejected():
+@pytest.mark.parametrize(
+    "mutate, reason",
+    [
+        pytest.param(
+            lambda monsters: monsters[1].update(instance_id="player-0"),
+            "duplicate monster ID",
+            id="duplicate-id",
+        ),
+        pytest.param(
+            lambda monsters: monsters[0].update(owner_instance_id=None),
+            "Unknown monster owner",
+            id="missing-owner",
+        ),
+        pytest.param(
+            lambda monsters: monsters[1].update(owner_instance_id="player"),
+            "multiple teams",
+            id="owner-in-two-teams",
+        ),
+        pytest.param(
+            lambda monsters: monsters[0].update(max_hp=0),
+            "Health outside valid bounds",
+            id="zero-max-hp",
+        ),
+        pytest.param(
+            lambda monsters: monsters[0].update(current_hp=float("nan")),
+            "Invalid numeric health",
+            id="nan-hp",
+        ),
+        pytest.param(
+            lambda monsters: monsters[0].update(fainted=True),
+            "Invalid fainted state",
+            id="inconsistent-fainted",
+        ),
+    ],
+)
+def test_invalid_snapshot_data_is_reported_as_unavailable(mutate, reason):
     initial = snapshot(1, [100], [100])
     current = snapshot(2, [100], [100])
-    current.data["monsters"][1]["instance_id"] = "player-0"
-    with pytest.raises(ValueError, match="duplicate monster ID"):
-        calculate_combat_indicators(initial, current)
+    mutate(current.data["monsters"])
 
-    current = snapshot(2, [100], [100])
-    current.data["monsters"][0]["owner_instance_id"] = None
-    with pytest.raises(ValueError, match="Unknown monster owner"):
-        calculate_combat_indicators(initial, current)
+    result = calculate_combat_indicators(initial, current)
 
-    current = snapshot(2, [100], [100])
-    current.data["monsters"][1]["owner_instance_id"] = "player"
-    with pytest.raises(ValueError, match="multiple teams"):
-        calculate_combat_indicators(initial, current)
+    assert result.indicators is None
+    assert reason in result.unavailable_reason
+    assert result.roster_changed is False
+
+
+@pytest.mark.parametrize(
+    "player_hp, opponent_hp",
+    [
+        pytest.param([], [100], id="no-player-monsters"),
+        pytest.param([0], [100], id="player-fainted-at-start"),
+    ],
+)
+def test_team_without_initially_available_monsters_is_unavailable(
+    player_hp, opponent_hp
+):
+    initial = snapshot(1, player_hp, opponent_hp)
+    current = snapshot(2, player_hp, opponent_hp)
+
+    result = calculate_combat_indicators(initial, current)
+
+    assert result.indicators is None
+    assert (
+        result.unavailable_reason
+        == "A team has no initially available monsters"
+    )
 
 
 def test_roster_change_is_reported_as_unavailable_result():
@@ -118,3 +169,38 @@ def test_roster_change_is_reported_as_unavailable_result():
     assert result.indicators is None
     assert result.roster_changed is True
     assert result.unavailable_reason == "Roster changes are not supported"
+
+
+def test_asymmetric_teams_are_averaged_per_team():
+    initial = snapshot(1, [100], [100, 100, 100])
+    current = snapshot(2, [100], [0, 100, 50])
+
+    result = calculate_combat_indicators(initial, current).indicators
+
+    assert result.player_health == pytest.approx(1.0)
+    assert result.opponent_health == pytest.approx(150 / 300)
+    assert result.opponent_availability == pytest.approx(2 / 3)
+
+
+def test_captured_monster_keeps_its_baseline_team():
+    initial = snapshot(1, [100], [100, 100])
+    current = snapshot(2, [100], [100, 100])
+    captured = current.data["monsters"][1]
+    captured.update(owner_instance_id="player", is_player=True)
+
+    result = calculate_combat_indicators(initial, current).indicators
+
+    assert result.player_health == pytest.approx(1.0)
+    assert result.opponent_health == pytest.approx(1.0)
+    assert result.opponent_availability == pytest.approx(1.0)
+
+
+def test_owner_change_without_capture_is_unavailable():
+    initial = snapshot(1, [100, 100], [100])
+    current = snapshot(2, [100, 100], [100])
+    current.data["monsters"][0]["owner_instance_id"] = "other-player"
+
+    result = calculate_combat_indicators(initial, current)
+
+    assert result.indicators is None
+    assert result.unavailable_reason == "Monster ownership changed"

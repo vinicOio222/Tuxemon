@@ -25,7 +25,7 @@ class CombatIndicators:
 class CombatAssessment:
     """Result of comparing two snapshots, with indicators or the reason they are unavailable."""
 
-    indicators: CombatIndicators | None
+    indicators: CombatIndicators | None = None
     unavailable_reason: str | None = None
     roster_changed: bool = False
 
@@ -41,15 +41,25 @@ class SnapshotMember:
     fainted: bool
 
 
-def _index_snapshot(event: TelemetryEvent) -> dict[str, SnapshotMember]:
-    """Indexes the monsters in a snapshot by their instance IDs."""
+def check_snapshot(event: TelemetryEvent) -> None:
+    """Rejects events that are not combat snapshots; this is a contract error."""
 
     if event.event_type != TelemetryEventType.MONSTER_SNAPSHOT:
         raise ValueError("Expected a monster snapshot")
     if event.data.get("snapshot_phase") not in {
-        "decision", "before_rewards", "after_rewards", "final"
+        "decision",
+        "before_rewards",
+        "after_rewards",
+        "final",
     }:
         raise ValueError("Expected a combat snapshot")
+
+
+def _index_snapshot(event: TelemetryEvent) -> dict[str, SnapshotMember]:
+    """Indexes the monsters in a snapshot by their instance IDs.
+
+    Raises ValueError for invalid data; callers report it as unavailable indicators.
+    """
 
     # Initialize the result dictionary, owner tracking for the snapshot
     # and extract the list of monsters from the event data.
@@ -106,15 +116,20 @@ def _summarize_team(
     baseline: dict[str, SnapshotMember],
     observed: dict[str, SnapshotMember],
     is_player: bool,
-) -> tuple[float, float]:
-    """Summarizes the health and availability of a team based on the observed snapshot."""
+) -> tuple[float, float] | None:
+    """Summarizes the health and availability of a team based on the observed snapshot.
+
+    Returns None when the team had no initially available monsters.
+    """
 
     members = [
-        observed[key] for key, member in baseline.items()
+        observed[key]
+        for key, member in baseline.items()
         if member.is_player is is_player and not member.fainted
     ]
     if not members:
-        raise ValueError("Team has no initially available monsters")
+        return None
+
     health = sum(member.current_hp for member in members)
     maximum = sum(member.max_hp for member in members)
     available = sum(not member.fainted for member in members)
@@ -137,7 +152,15 @@ def calculate_combat_indicators(
     if initial.data.get("snapshot_phase") != "decision":
         raise ValueError("Baseline must be in the first decision snapshot")
 
-    baseline, observed = _index_snapshot(initial), _index_snapshot(current)
+    # Validate the initial and current snapshots before processing.
+    check_snapshot(initial)
+    check_snapshot(current)
+
+    try:
+        baseline, observed = _index_snapshot(initial), _index_snapshot(current)
+    except ValueError as error:
+        return CombatAssessment(indicators=None, unavailable_reason=str(error))
+
     if baseline.keys() != observed.keys():
         return CombatAssessment(
             indicators=None,
@@ -145,6 +168,8 @@ def calculate_combat_indicators(
             roster_changed=True,
         )
 
+    # Check for any ownership changes or captures
+    # that would invalidate the combat assessment.
     for key, initial_member in baseline.items():
         current_member = observed[key]
         captured = not initial_member.is_player and current_member.is_player
@@ -152,17 +177,23 @@ def calculate_combat_indicators(
             initial_member.owner_id != current_member.owner_id
             or initial_member.is_player != current_member.is_player
         ):
-            raise ValueError("Monster ownership changed")
+            return CombatAssessment(
+                indicators=None, unavailable_reason="Monster ownership changed"
+            )
 
-    # Summarize the health and availability for both the player and the opponent.
-    player_health, player_availability = _summarize_team(baseline, observed, True)
-    opponent_health, opponent_availability = _summarize_team(baseline, observed, False)
+    player = _summarize_team(baseline, observed, True)
+    opponent = _summarize_team(baseline, observed, False)
+    if player is None or opponent is None:
+        return CombatAssessment(
+            indicators=None,
+            unavailable_reason="A team has no initially available monsters",
+        )
 
     return CombatAssessment(
         indicators=CombatIndicators(
-            player_health=player_health,
-            player_availability=player_availability,
-            opponent_health=opponent_health,
-            opponent_availability=opponent_availability,
+            player_health=player[0],
+            player_availability=player[1],
+            opponent_health=opponent[0],
+            opponent_availability=opponent[1],
         )
     )

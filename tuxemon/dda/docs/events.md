@@ -86,7 +86,22 @@ Optional fields added in `0.1.1`:
   events. The default limit is 4,096 buffered events per battle, reserving room
   for a final snapshot and `battle_ended`.
 
-The client exports finalized battles in the background. A failed disk write is
+Export is off by default. Set `gameplay.dda_telemetry_export: true` in the
+config to write each finalized battle to JSONL. Live observation runs either
+way, since the player model depends on it.
+
+DDA is enabled per campaign by `mods/<slug>/dda.yaml`:
+
+```yaml
+version: 1
+enabled: true
+```
+
+A missing or invalid file disables DDA. The value is read when a new game
+starts and stored in the `dda_enabled` game variable, so saved games keep
+their choice. When disabled, no battle is observed or exported.
+
+When enabled, the client exports finalized battles in the background. A failed disk write is
 retried once; persistent failures and a full export queue are logged. A normal
 shutdown waits for accepted exports. A forced termination cannot finalize an
 active battle or guarantee that pending exports reach disk.

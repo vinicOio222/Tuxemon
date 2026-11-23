@@ -24,53 +24,40 @@ TELEMETRY_SCHEMA_VERSION: str = "0.1.1"
 # Enums
 # Enums for snapshot phases, telemetry event types, outcomes, and action types.
 # --------------------------------------------------
-class SnapshotPhase(str, Enum):
+class BaseEnum(str, Enum):
+    @classmethod
+    def members(cls) -> set[str]:
+        return {member.value for member in cls}
+
+
+class SnapshotPhase(BaseEnum):
     DECISION = "decision"
     BEFORE_REWARDS = "before_rewards"
     AFTER_REWARDS = "after_rewards"
     FINAL = "final"
 
-    @staticmethod
-    def members() -> set[str]:
-        return {phase.value for phase in SnapshotPhase}
 
-
-class TelemetryEventType(str, Enum):
+class TelemetryEventType(BaseEnum):
     ACTION = "action"
     BATTLE_ENDED = "battle_ended"
     BATTLE_STARTED = "battle_started"
     MONSTER_SNAPSHOT = "monster_snapshot"
     SWITCH = "switch"
 
-    @staticmethod
-    def members() -> set[str]:
-        return {
-            event_type.value
-            for event_type in TelemetryEventType
-        }
 
-
-class OutcomesType(str, Enum):
+class OutcomesType(BaseEnum):
     WIN = "win"
     LOSS = "loss"
     DRAW = "draw"
     ESCAPED = "escaped"
     UNKNOWN = "unknown"
 
-    @staticmethod
-    def members() -> set[str]:
-        return {outcome.value for outcome in OutcomesType}
 
-
-class ActionType(str, Enum):
+class ActionType(BaseEnum):
     ITEM = "item"
     STATUS = "status"
     TECHNIQUE = "technique"
     UNKNOWN = "unknown"
-
-    @staticmethod
-    def members() -> set[str]:
-        return {action_type.value for action_type in ActionType}
 
 
 # Data Classes
@@ -81,14 +68,14 @@ class ActionData:
     """A structured representation of an action taken by a monster."""
 
     execution: str
-    user: str | None
-    user_instance_id: str | None
-    user_owner_instance_id: str | None
-    user_is_player: bool | None
-    method: str | None
     action_kind: str
-    target: str | None
-    target_instance_id: str | None
+    user: str | None = None
+    user_instance_id: str | None = None
+    user_owner_instance_id: str | None = None
+    user_is_player: bool | None = None
+    method: str | None = None
+    target: str | None = None
+    target_instance_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -98,9 +85,6 @@ class ActionData:
 class MonsterSnapshotData:
     """A structured representation of a monster's state."""
 
-    owner_slug: str | None
-    owner_instance_id: str | None
-    is_player: bool | None
     instance_id: str
     slug: str
     level: int
@@ -108,6 +92,9 @@ class MonsterSnapshotData:
     max_hp: int
     hp_ratio: float
     fainted: bool
+    owner_slug: str | None = None
+    owner_instance_id: str | None = None
+    is_player: bool | None = None
     statuses: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -131,8 +118,8 @@ class BattleRecord:
 class PlayerIndicators:
     """Aggregated indicators of the player's performance over recent battles."""
 
-    current: BattleRecord | None = None
     sample_size: int
+    current: BattleRecord | None = None
     average_turns: float | None = None
     recent: tuple[BattleRecord, ...] = field(default_factory=tuple)
     outcomes: dict[str, int] = field(default_factory=dict)
@@ -147,7 +134,9 @@ class TelemetryEvent:
     battle_id: str
     turn: int
     data: dict[str, Any]
-    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    timestamp: datetime = field(
+        default_factory=lambda: datetime.now(timezone.utc)
+    )
     schema_version: str = TELEMETRY_SCHEMA_VERSION
 
     def to_dict(self) -> dict[str, Any]:

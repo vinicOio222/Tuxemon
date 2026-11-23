@@ -40,13 +40,15 @@ logger = logging.getLogger(__name__)
 
 
 # Regular expressions for validating battle IDs and avoiding Windows device names.
-_BATTLE_ID = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}")
-_WINDOWS_DEVICE = re.compile(r"CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9]", re.I)
+BATTLE_ID = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}")
+WINDOWS_DEVICE = re.compile(r"CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9]", re.I)
 
 
 def sanitize_battle_id(battle_id: str) -> str:
     """Sanitize and validate the given battle ID."""
-    if not _BATTLE_ID.fullmatch(battle_id) or _WINDOWS_DEVICE.fullmatch(battle_id):
+    if not BATTLE_ID.fullmatch(battle_id) or WINDOWS_DEVICE.fullmatch(
+        battle_id
+    ):
         raise ValueError(f"Unsafe telemetry battle ID: {battle_id!r}")
     return battle_id
 
@@ -76,7 +78,9 @@ class TelemetryRecorder:
             str(uuid4()) if battle_id is None else battle_id
         )
         if type(max_events) is not int or max_events < 3:
-            raise ValueError("Telemetry requires room for at least three events.")
+            raise ValueError(
+                "Telemetry requires room for at least three events."
+            )
         self.output_dir = output_dir or USER_RECORDING_DIR / "telemetry"
         self.events: list[TelemetryEvent] = []
         self._max_events = max_events
@@ -117,7 +121,7 @@ class TelemetryRecorder:
         logger.info(
             "Recorded telemetry event: battle=%s event=%s turn=%s",
             self.battle_id,
-            event.event_type,
+            event.event_type.value,
             turn,
         )
         return deepcopy(event)
@@ -153,15 +157,12 @@ class TelemetryRecorder:
                 logger.exception(
                     "Telemetry consumer failed: battle=%s event=%s turn=%s",
                     self.battle_id,
-                    event.event_type,
+                    event.event_type.value,
                     event.turn,
                 )
 
     def record_battle_start(
-        self,
-        turn: int,
-        combat_type: str,
-        battle_mode: str
+        self, turn: int, combat_type: str, battle_mode: str
     ) -> TelemetryEvent:
         """Record the start of a battle."""
 
@@ -188,14 +189,14 @@ class TelemetryRecorder:
         data: dict[str, Any] = {"outcome": outcome}
         if aborted:
             if outcome != OutcomesType.UNKNOWN:
-                raise ValueError("An interrupted battle has an unknown outcome.")
+                raise ValueError(
+                    "An interrupted battle has an unknown outcome."
+                )
             data["aborted"] = True
         return self.record(TelemetryEventType.BATTLE_ENDED, turn, data)
 
     def record_action(
-        self,
-        turn: int,
-        action: EnqueuedAction
+        self, turn: int, action: EnqueuedAction
     ) -> TelemetryEvent:
         """Records an action taken by a monster."""
 
@@ -209,7 +210,7 @@ class TelemetryRecorder:
         for method_type, kind in (
             (Item, ActionType.ITEM),
             (Status, ActionType.STATUS),
-            (Technique, ActionType.TECHNIQUE)
+            (Technique, ActionType.TECHNIQUE),
         ):
             if isinstance(method, method_type):
                 action_kind = kind
@@ -225,12 +226,11 @@ class TelemetryRecorder:
             method=self._entity_slug(method),
             action_kind=action_kind,
             target=self._entity_slug(action.target),
-            target_instance_id=self._entity_id(action.target)
+            target_instance_id=self._entity_id(action.target),
         )
 
         return self.record(
-            TelemetryEventType.ACTION,
-            turn, action_data.to_dict()
+            TelemetryEventType.ACTION, turn, action_data.to_dict()
         )
 
     def record_switch(
@@ -270,10 +270,9 @@ class TelemetryRecorder:
             data={
                 "snapshot_phase": snapshot_phase,
                 "monsters": [
-                    self._get_monster_data(monster)
-                    for monster in monsters
-                ]
-            }
+                    self._get_monster_data(monster) for monster in monsters
+                ],
+            },
         )
 
     def write(self, output_path: Path | None = None) -> Path:
@@ -329,11 +328,7 @@ class TelemetryRecorder:
         if entity is None:
             return None
 
-        return getattr(
-            entity,
-            "slug",
-            getattr(entity, "name", None)
-        )
+        return getattr(entity, "slug", getattr(entity, "name", None))
 
     @staticmethod
     def _user_owner_id(user: Any) -> str | None:
@@ -361,7 +356,9 @@ class TelemetryRecorder:
         owner = monster.owner
 
         return MonsterSnapshotData(
-            owner_instance_id=str(owner.instance_id) if owner is not None else None,
+            owner_instance_id=str(owner.instance_id)
+            if owner is not None
+            else None,
             owner_slug=owner.slug if owner is not None else None,
             is_player=owner.is_player if owner is not None else None,
             instance_id=str(monster.instance_id),
@@ -371,10 +368,7 @@ class TelemetryRecorder:
             max_hp=monster.hp,
             hp_ratio=monster.hp_ratio,
             fainted=monster.is_fainted,
-            statuses=[
-                status.slug
-                for status in monster.status.get_statuses()
-            ],
+            statuses=[status.slug for status in monster.status.get_statuses()],
         ).to_dict()
 
 
@@ -402,7 +396,9 @@ class TelemetryExporter:
         """
 
         if not self._slots.acquire(blocking=False):
-            raise RuntimeError(f"Telemetry export queue full: {recorder.battle_id}")
+            raise RuntimeError(
+                f"Telemetry export queue full: {recorder.battle_id}"
+            )
         try:
             job = self._executor.submit(self._write, recorder)
         except RuntimeError:
@@ -420,7 +416,9 @@ class TelemetryExporter:
         self._slots.release()
         if error := job.exception():
             logger.error(
-                "Could not export battle telemetry: %s", battle_id, exc_info=error
+                "Could not export battle telemetry: %s",
+                battle_id,
+                exc_info=error,
             )
 
     @staticmethod

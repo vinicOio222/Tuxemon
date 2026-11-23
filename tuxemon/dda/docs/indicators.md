@@ -22,13 +22,14 @@ denominators; members already fainted at baseline are excluded even if revived.
 An empty initially available team is unavailable rather than a zero-valued
 indicator. The two teams' values are kept separately.
 
-These are current resources, not damage or healing totals. In particular,
-level-up and other reward effects are included: when maximum HP changes, the
-new maximum is used. A change in the ratio can therefore reflect a reward
-instead of combat. Snapshot phases (`decision`, `before_rewards`,
-`after_rewards` and `final`) distinguish when each measurement was made;
-`before_rewards` can occur multiple times. Comparing snapshots does not
-isolate reward effects or establish damage per action.
+These are current resources, not damage or healing totals. Reward effects
+(such as level-up maximum HP changes) are excluded: once a `before_rewards`
+snapshot is observed, the battle's combat indicators are frozen at that
+pre-reward state. Later `after_rewards` and `final` snapshots update only the
+phase and turn of the record. If the battle has no rewards, the last snapshot
+before the end is used. Snapshot phases (`decision`, `before_rewards`,
+`after_rewards` and `final`) distinguish when each measurement was made.
+Comparing snapshots does not establish damage per action.
 
 ## Battle records and availability
 
@@ -40,7 +41,10 @@ monsters observed fainted in snapshots, even if later revived. If a monster
 faints and revives between snapshots, this count can miss that event.
 
 The model rejects missing or invalid HP, IDs, team or owner data, duplicate
-IDs, and inconsistent fainted states. A changed roster invalidates indicators
+IDs, and inconsistent fainted states. These cases, and empty or zero-maximum
+teams, return an unavailable `CombatAssessment` with a reason. Contract
+violations (non-snapshot events, wrong phase, different battles, or turn order)
+still raise `ValueError`. A changed roster invalidates indicators
 for the rest of that battle, even if the original roster returns. A capture
 is treated as the existing special case: the captured monster remains assigned
 to its baseline team for these calculations.

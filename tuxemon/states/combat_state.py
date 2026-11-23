@@ -58,6 +58,7 @@ from tuxemon.db import (
     MonsterModel,
     OutputBattle,
 )
+from tuxemon.dda.knowledge import DDA_VARIABLE
 from tuxemon.dda.telemetry import TelemetryRecorder
 from tuxemon.dda.types import SnapshotPhase
 from tuxemon.entity.npc import NPC
@@ -202,9 +203,16 @@ class CombatState(CombatAnimations):
         self.telemetry_final_snapshot_recorded = False
         self.telemetry_end_recorded = False
 
-        # Initialize the telemetry recorder with the DDA player model observer.
+        # DDA is chosen per campaign; when disabled, nothing is observed or exported.
+        self.dda_enabled = bool(
+            self.session.player.game_variables.get(DDA_VARIABLE, False)
+        )
         self.telemetry_recorder = TelemetryRecorder(
-            on_event=self.client.dda_player_model.observe
+            on_event=(
+                self.client.dda_player_model.observe
+                if self.dda_enabled
+                else None
+            )
         )
 
         # Record the start of the battle for telemetry purposes.
@@ -212,7 +220,7 @@ class CombatState(CombatAnimations):
             self.telemetry_recorder.record_battle_start,
             turn=self.combat_session.turn,
             combat_type=context.combat_type.value,
-            battle_mode=context.battle_mode.value
+            battle_mode=context.battle_mode.value,
         )
 
         self._lock_update = self.client.config.combat_click_to_continue
@@ -337,7 +345,7 @@ class CombatState(CombatAnimations):
                     for player in self.combat_session.players
                     for monster in player.monsters
                 ],
-                snapshot_phase=SnapshotPhase.DECISION
+                snapshot_phase=SnapshotPhase.DECISION,
             )
             if not self._decision_queue:
                 c_session.initialize_hit_chances()
@@ -436,7 +444,7 @@ class CombatState(CombatAnimations):
             record_telemetry(
                 self.telemetry_recorder.record_action,
                 self.combat_session.turn,
-                action
+                action,
             )
             self.perform_action(action.user, action.method, action.target)
             self.combat_session.action_queue.sort()
@@ -618,7 +626,7 @@ class CombatState(CombatAnimations):
     ) -> None:
         """Finalize telemetry and queue the battle for export once."""
 
-        if self.telemetry_export_queued:
+        if not self.dda_enabled or self.telemetry_export_queued:
             return
 
         if self.telemetry_outcome is not None:
@@ -652,6 +660,9 @@ class CombatState(CombatAnimations):
             )
             if not self.telemetry_end_recorded:
                 return
+
+        if not self.client.config.dda_telemetry_export:
+            return
 
         self.telemetry_export_queued = record_telemetry(
             self.client.telemetry_exporter.submit, self.telemetry_recorder
@@ -849,7 +860,6 @@ class CombatState(CombatAnimations):
                 )
                 if m:
                     message += "\n" + m
-
 
         self.text_anim.add_text_animation(
             partial(self.dialog.alert, message, self.text_area), action_time
@@ -1411,7 +1421,8 @@ class CombatState(CombatAnimations):
             # wild opponent is looked up from the session instead.
             wild = next(
                 (
-                    npc for npc in self.combat_session.players
+                    npc
+                    for npc in self.combat_session.players
                     if npc is not self.session.player
                 ),
                 None,
