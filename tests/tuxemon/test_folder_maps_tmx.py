@@ -39,6 +39,28 @@ def to_basename(filepath: str) -> str:
     return Path(filepath).name
 
 
+def test_loch_battles_define_environment_before_start():
+    root = ET.parse(fetch_asset(FOLDER, "taba_ba_br_4.tmx")).getroot()
+    battle_count = 0
+    for obj in root.findall(".//object"):
+        actions = sorted(
+            (
+                prop
+                for prop in obj.findall("properties/property")
+                if re.fullmatch(r"act\d+", prop.attrib["name"])
+            ),
+            key=lambda prop: int(prop.attrib["name"][3:]),
+        )
+        for index, action in enumerate(actions):
+            if action.attrib["value"] == "start_battle player,loch":
+                assert index > 0
+                assert actions[index - 1].attrib["value"] == (
+                    "set_environment interior"
+                ), obj.attrib["name"]
+                battle_count += 1
+    assert battle_count == 3
+
+
 def _is_object_property(
     obj: ET.Element, property_element: str, valid_options: list[str]
 ) -> bool:

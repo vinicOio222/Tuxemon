@@ -7,6 +7,7 @@ import random
 from typing import TYPE_CHECKING
 
 from tuxemon.constants.asset_loader import fetch_asset
+from tuxemon.dda.knowledge import DDA_VARIABLE, load_dda_enabled
 from tuxemon.entity.npc import NPC
 from tuxemon.locale.locale import T
 
@@ -78,6 +79,11 @@ class GameLauncher:
         # Set template
         template = ["player", meta.sprite, meta.combat_sheet]
         execute.execute_action("set_template", template)
+
+        # Campaign choice for DDA, kept with the save
+        session.player.game_variables.set(
+            DDA_VARIABLE, load_dda_enabled(meta.slug)
+        )
 
         # Optionally clean up states
         if remove_states:

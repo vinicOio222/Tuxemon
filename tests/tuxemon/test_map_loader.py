@@ -161,7 +161,8 @@ def test_add_to_cache_disabled(mocker, fake_context):
 
 
 def test_remove_from_cache(loader):
-    loader._cache["/fake/path"] = MagicMock()
+    key = str(Path("/fake/path").resolve())
+    loader._cache[key] = MagicMock()
     assert loader.remove_from_cache("/fake/path") is True
     assert loader.remove_from_cache("/fake/path") is False
 
