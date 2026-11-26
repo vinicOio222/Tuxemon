@@ -58,6 +58,12 @@ class ActionType(BaseEnum):
     STATUS = "status"
     TECHNIQUE = "technique"
     UNKNOWN = "unknown"
+    
+
+class FuzzyTerms(BaseEnum):
+    LOW = "low"
+    MODERATE = "moderate"
+    HIGH = "high"
 
 
 # Data Classes

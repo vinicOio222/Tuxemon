@@ -123,24 +123,28 @@ replay tool remains future work.
 
 ## 3. Analyze: Fuzzy Inference
 
-- [ ] Choose a few initial inputs: health reserves and availability;
-	justify additional inputs before expanding the rule base.
-- [ ] Select and document the inference and defuzzification models.
-- [ ] Evaluate an existing library (for example, scikit-fuzzy) with a small
-	compatibility check; declare dependencies only when adopted.
-- [ ] Define versioned universes and overlapping membership functions.
-- [ ] Define a numeric output and low, moderate, and high pressure terms.
-- [ ] Cover combinations such as both sides healthy, both weakened, player
-	advantage, and player disadvantage, without classifying by HP alone.
-- [ ] Handle no activated rules and insufficient data with an explicit,
-	safe result rather than an arbitrary adjustment.
-- [ ] Return membership degrees and activated rules to explain each result.
+- [x] Choose initial signals: health reserves and availability are combined
+	with equal weight into one team-strength input per side. This is a
+	provisional assumption; justify and validate it before adding inputs.
+- [x] Select and document Mamdani inference: minimum conjunction/implication,
+	maximum aggregation, and sampled-centroid defuzzification.
+- [x] Define version-1 input/output universes and overlapping low, moderate,
+	and high membership functions; see the [fuzzy inference contract](./docs/fuzzy.md).
+- [x] Define numeric pressure in `[0, 1]` with low, moderate, and high terms.
+- [x] Configure all nine team-strength term combinations. Test balanced
+	healthy/weakened teams and relative player/opponent advantage.
+- [x] Return an unavailable result with a reason for missing/invalid inputs
+	or when no rule activates; never convert it into an adjustment.
+- [x] Return membership degrees, activated rule names, output-term
+	activations, and the crisp pressure for explainability.
 - [ ] Calibrate parameters across multiple battles, not a single victory.
-- [ ] Test boundaries, overlaps, rule coverage, finite values, determinism,
-	and expected trends in controlled scenarios.
+- [x] Test boundaries, overlaps, complete rule coverage, finite values,
+	determinism, and expected trends in controlled scenarios.
 
-Completion: reproducible, explainable inference validated without changing
-the game.
+Implementation and controlled tests are complete without changing the game.
+The section is not empirically complete until the external-library comparison
+and multi-battle calibration are performed. See the [fuzzy inference
+contract](./docs/fuzzy.md) for assumptions and limitations.
 
 ## 4. Knowledge: Configuration and History
 
