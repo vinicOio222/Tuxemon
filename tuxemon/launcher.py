@@ -7,7 +7,8 @@ import random
 from typing import TYPE_CHECKING
 
 from tuxemon.constants.asset_loader import fetch_asset
-from tuxemon.dda.knowledge import DDA_VARIABLE, load_dda_enabled
+from tuxemon.dda.knowledge import load_dda_enabled
+from tuxemon.dda.types import DDA_VARIABLE, DDA_CAMPAIGN_VARIABLE
 from tuxemon.entity.npc import NPC
 from tuxemon.locale.locale import T
 
@@ -84,6 +85,7 @@ class GameLauncher:
         session.player.game_variables.set(
             DDA_VARIABLE, load_dda_enabled(meta.slug)
         )
+        session.player.game_variables.set(DDA_CAMPAIGN_VARIABLE, meta.slug)
 
         # Optionally clean up states
         if remove_states:

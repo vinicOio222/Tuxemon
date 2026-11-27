@@ -18,7 +18,12 @@ if TYPE_CHECKING:
     from tuxemon.dda.indicators import CombatIndicators
 
 
-TELEMETRY_SCHEMA_VERSION: str = "0.1.1"
+# Constants
+# DDA-related game variable names
+# --------------------------------------------------
+DDA_CAMPAIGN_VARIABLE: str = "dda_campaign"
+DDA_VARIABLE: str = "dda_enabled"
+TELEMETRY_SCHEMA_VERSION: str = "0.2.0"
 
 
 # Enums
@@ -41,6 +46,7 @@ class TelemetryEventType(BaseEnum):
     ACTION = "action"
     BATTLE_ENDED = "battle_ended"
     BATTLE_STARTED = "battle_started"
+    DDA_ANALYSIS = "dda_analysis"
     MONSTER_SNAPSHOT = "monster_snapshot"
     SWITCH = "switch"
 
@@ -64,6 +70,11 @@ class FuzzyTerms(BaseEnum):
     LOW = "low"
     MODERATE = "moderate"
     HIGH = "high"
+
+
+class DDAAnalysisMode(BaseEnum):
+    OBSERVATION = "observation"
+    DISABLED = "disabled"
 
 
 # Data Classes

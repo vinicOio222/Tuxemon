@@ -164,16 +164,18 @@ contract](./docs/fuzzy.md) for assumptions and limitations.
 
 ## 5. Controller: Observation Mode
 
-- [ ] Create one controller per battle, shared by the monsters' AI instances.
-- [ ] Run at the selected decision point, once per turn, before trainer
+- [x] Create one controller per eligible battle, owned by the combat state.
+- [x] Run at the selected decision point, once per turn, before trainer
 	decisions; document execution order relative to effects and menus.
-- [ ] Emit dda_analysis with indicators, membership degrees, rules, output,
+- [x] Emit dda_analysis with indicators, membership degrees, rules, output,
 	mode, and configuration version, without applying adjustments.
-- [ ] Reset state at the end and prevent duplicate analyses.
-- [ ] Define local failure behavior: log the error and retain the original AI,
+- [x] Close battle-local state at the end and prevent duplicate analyses.
+- [x] Define local failure behavior: log the error and retain the original AI,
 	without hiding combat errors unrelated to DDA.
-- [ ] Test observation without mutations, repeated turns, resets, missing
+- [x] Test observation without mutations, repeated turns, closure, missing
 	data, and indicator equivalence during replay.
+- [ ] Manually validate observation in a real single trainer battle, including
+	loading a save, and inspect its exported `dda_analysis` events.
 
 ## 6. Plan: Stable Policy
 

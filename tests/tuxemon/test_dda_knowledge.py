@@ -121,3 +121,8 @@ def test_invalid_file_disables_dda(mods_root: Path, text: str) -> None:
     settings = knowledge.load_dda_settings("campaign")
     assert settings.enabled is False
     assert knowledge.load_dda_enabled("campaign") is False
+
+
+def test_legacy_config_defaults_to_disabled_observation(mods_root: Path) -> None:
+    write_dda(mods_root, VALID_DDA_YAML)
+    assert knowledge.load_dda_settings("campaign").mode == "disabled"

@@ -1,8 +1,10 @@
 # Fuzzy inference
 
 The first inference version estimates relative combat pressure for a single
-trainer battle. It does not estimate player skill and does not change game
-decisions. Its schema and fuzzy semantics are version 1, selected by
+trainer battle. It does not estimate player skill or change game decisions.
+Observation is integrated into the decision phase; see the
+[event contract](./events.md#dda_analysis) for ordering and output.
+Its schema and fuzzy semantics are version 1, selected by
 `DDASettings.version`.
 
 ## Inputs and universes

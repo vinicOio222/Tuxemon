@@ -8,14 +8,17 @@ from uuid import uuid4
 import pytest
 
 from tuxemon.base_client import BaseClient
+from tuxemon.combat.combat_context import BattleMode, CombatType
 from tuxemon.combat.machine import CombatPhase
 from tuxemon.dda.player_model import PlayerModel
 from tuxemon.dda.telemetry import TelemetryExporter, TelemetryRecorder
 from tuxemon.dda.types import OutcomesType, TelemetryEventType
+from tuxemon.game_variables import PlayerVariablesManager
+from tuxemon.launcher import GameLauncher
 from tuxemon.monster.monster import Monster
 from tuxemon.monster.stats import BasicStats
 from tuxemon.monster.status import MonsterStatusHandler
-from tuxemon.states.combat_state import CombatState
+from tuxemon.states.combat_state import CombatState, create_dda_controller
 
 
 @pytest.fixture
@@ -131,6 +134,7 @@ def test_decision_phase_records_monsters_and_processes_decisions(
         SimpleNamespace(monsters=[]),
     ]
     state.telemetry_recorder = TelemetryRecorder(output_dir=tmp_path)
+    state.dda_controller = None
     state._decision_queue = []
 
     CombatState.transition_phase(state, CombatPhase.DECISION)
@@ -147,6 +151,127 @@ def test_decision_phase_records_monsters_and_processes_decisions(
     state.combat_session.check_decisions.assert_called_once_with(state.session)
     state.combat_session.initialize_hit_chances.assert_called_once_with()
     state.process_player_decisions.assert_called_once_with()
+
+
+def test_decision_phase_analyzes_after_snapshot_before_ai(monster):
+    state = MagicMock(spec=CombatState)
+    state.event_bus = MagicMock()
+    state.session = MagicMock()
+    state.combat_session = MagicMock()
+    state.combat_session.turn = 1
+    state.combat_session.players = [SimpleNamespace(monsters=[monster])]
+    state.telemetry_recorder = TelemetryRecorder()
+    state.dda_controller = MagicMock()
+    state._decision_queue = []
+
+    def analyze(turn, snapshot_recorded):
+        assert turn == 1 and snapshot_recorded
+        assert state.telemetry_recorder.events[-1].event_type == (
+            TelemetryEventType.MONSTER_SNAPSHOT
+        )
+        state.process_player_decisions.assert_not_called()
+
+    state.dda_controller.analyze.side_effect = analyze
+    CombatState.transition_phase(state, CombatPhase.DECISION)
+
+    state.dda_controller.analyze.assert_called_once_with(1, True)
+    state.process_player_decisions.assert_called_once_with()
+
+
+def test_observation_failure_does_not_prevent_decisions(monster, caplog):
+    state = MagicMock(spec=CombatState)
+    state.event_bus = MagicMock()
+    state.session = MagicMock()
+    state.combat_session = MagicMock()
+    state.combat_session.turn = 1
+    state.combat_session.players = [SimpleNamespace(monsters=[monster])]
+    state.telemetry_recorder = TelemetryRecorder()
+    state.dda_controller = MagicMock()
+    state.dda_controller.analyze.side_effect = ValueError("inference failed")
+    state._decision_queue = []
+
+    CombatState.transition_phase(state, CombatPhase.DECISION)
+
+    state.process_player_decisions.assert_called_once_with()
+    assert "inference failed" in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("enabled", "combat_type", "battle_mode"),
+    [
+        pytest.param(False, CombatType.TRAINER, BattleMode.SINGLE, id="off"),
+        pytest.param(True, CombatType.MONSTER, BattleMode.SINGLE, id="wild"),
+        pytest.param(True, CombatType.TRAINER, BattleMode.DOUBLE, id="double"),
+    ],
+)
+def test_observation_is_not_created_outside_scope(
+    enabled, combat_type, battle_mode
+):
+    context = MagicMock()
+    context.combat_type = combat_type
+    context.battle_mode = battle_mode
+
+    assert create_dda_controller(
+        context, enabled, PlayerModel(), TelemetryRecorder()
+    ) is None
+    context.session.player.game_variables.get.assert_not_called()
+
+
+def test_observation_uses_saved_campaign_settings():
+    context = MagicMock()
+    context.combat_type = CombatType.TRAINER
+    context.battle_mode = BattleMode.SINGLE
+    context.session.player.game_variables.get.return_value = "tuxemon"
+    model = PlayerModel()
+    recorder = TelemetryRecorder(on_event=model.observe)
+
+    assert create_dda_controller(context, True, model, recorder) is not None
+
+
+def test_old_save_without_campaign_keeps_observation_disabled(caplog):
+    context = MagicMock()
+    context.combat_type = CombatType.TRAINER
+    context.battle_mode = BattleMode.SINGLE
+    context.session.player.game_variables.get.return_value = None
+
+    assert create_dda_controller(
+        context, True, PlayerModel(), TelemetryRecorder()
+    ) is None
+    assert "campaign is missing from save" in caplog.text
+
+
+def test_new_campaign_identifier_survives_game_variable_restore(monkeypatch):
+    variables = PlayerVariablesManager()
+    session = MagicMock()
+    session.player.game_variables = variables
+    meta = SimpleNamespace(
+        name="Tuxemon",
+        version="1",
+        slug="tuxemon",
+        starting_position=(0, 0),
+        starting_map="test",
+        starting_players=["player"],
+        starting_money=(0, 0),
+        starting_names=["name"],
+        sprite="sprite",
+        combat_sheet="sheet",
+    )
+    monkeypatch.setattr("tuxemon.launcher.fetch_asset", lambda *args: "map")
+    monkeypatch.setattr("tuxemon.launcher.NPC.create_player", MagicMock())
+    monkeypatch.setattr("tuxemon.launcher.T.translate", lambda name: name)
+    GameLauncher(MagicMock()).launch(session, meta)
+
+    restored = PlayerVariablesManager()
+    restored.set_state(variables.get_state())
+    context = MagicMock()
+    context.combat_type = CombatType.TRAINER
+    context.battle_mode = BattleMode.SINGLE
+    context.session.player.game_variables = restored
+
+    assert restored.get("dda_campaign") == "tuxemon"
+    assert create_dda_controller(
+        context, restored.get("dda_enabled"), PlayerModel(), TelemetryRecorder()
+    ) is not None
 
 
 @pytest.mark.parametrize(
@@ -179,6 +304,7 @@ def test_record_monsters_rejects_unknown_snapshot_phase(tmp_path, monster):
 
 def test_battle_end_writes_final_snapshot_once(tmp_path, monster):
     state = MagicMock(spec=CombatState)
+    state.dda_controller = None
     state.dda_enabled = True
     state.combat_session = SimpleNamespace(
         turn=5,
@@ -215,6 +341,7 @@ def test_battle_end_skips_export_when_dda_export_is_disabled(
     tmp_path, monster
 ):
     state = MagicMock(spec=CombatState)
+    state.dda_controller = None
     state.dda_enabled = True
     state.combat_session = SimpleNamespace(
         turn=5,
@@ -268,6 +395,7 @@ def test_battle_end_skips_telemetry_when_campaign_dda_is_disabled(
 
 def test_end_combat_retries_rejected_telemetry_export(tmp_path, monster):
     state = MagicMock(spec=CombatState)
+    state.dda_controller = None
     state.dda_enabled = True
     recorder = TelemetryRecorder(output_dir=tmp_path)
     state.telemetry_recorder = recorder
@@ -325,6 +453,7 @@ def test_end_combat_retries_rejected_telemetry_export(tmp_path, monster):
 
 def test_escape_saves_telemetry_before_session_reset(tmp_path, monster):
     state = MagicMock(spec=CombatState)
+    state.dda_controller = None
     state.dda_enabled = True
     state.telemetry_recorder = TelemetryRecorder(output_dir=tmp_path)
     state.client = SimpleNamespace(
@@ -437,6 +566,7 @@ def test_game_cleanup_exports_an_interrupted_battle_once(tmp_path):
     client.telemetry_exporter = TelemetryExporter()
     model = PlayerModel()
     state = MagicMock(spec=CombatState)
+    state.dda_controller = None
     state.dda_enabled = True
     state.client = client
     state.combat_session = SimpleNamespace(turn=2)

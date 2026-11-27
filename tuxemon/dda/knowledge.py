@@ -22,11 +22,9 @@ from pydantic import (
 
 from tuxemon.constants.paths import mods_folder
 from tuxemon.database.yaml_utils import load_yaml
-from tuxemon.dda.types import FuzzyTerms
+from tuxemon.dda.types import FuzzyTerms, DDAAnalysisMode
 
 logger = logging.getLogger(__name__)
-
-DDA_VARIABLE: str = "dda_enabled"
 
 
 class FuzzyRuleSettings(BaseModel):
@@ -87,6 +85,9 @@ class DDASettings(BaseModel):
 
     version: Literal[1] = Field(..., description="Supported schema version.")
     enabled: bool = Field(False, description="Whether DDA is active.")
+    mode: DDAAnalysisMode = Field(
+        DDAAnalysisMode.DISABLED, description="DDA analysis mode."
+    )
     fuzzy: FuzzySettings | None = None
 
     @model_validator(mode="after")
@@ -102,7 +103,7 @@ def load_dda_settings(mod_slug: str) -> DDASettings:
     if not path.is_file():
         return DDASettings(version=1, enabled=False)
     try:
-        settings = DDASettings.model_validate(load_yaml(path) or {})
+        settings = DDASettings.model_validate(load_yaml(path))
     except (OSError, yaml.YAMLError, ValidationError) as e:
         logger.warning(
             "Invalid dda.yaml for mod '%s', DDA disabled: %s", mod_slug, e

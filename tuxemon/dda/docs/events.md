@@ -9,8 +9,8 @@ Envelope (always present):
 
 | Field | Type | Notes |
 | --- | --- | --- |
-| `schema_version` | string | `TELEMETRY_SCHEMA_VERSION` (`1.1.0`). |
-| `event_type` | string | One of `battle_started`, `action`, `switch`, `monster_snapshot`, `battle_ended`. |
+| `schema_version` | string | `TELEMETRY_SCHEMA_VERSION` (`0.2.0`). |
+| `event_type` | string | One of `battle_started`, `action`, `switch`, `monster_snapshot`, `dda_analysis`, `battle_ended`. |
 | `battle_id` | string | Battle identifier; the recorder generates a UUID by default. |
 | `turn` | int | Turn number, zero or greater. The combat producer emits events in non-decreasing turn order. |
 | `data` | object | Payload, described below. |
@@ -86,6 +86,28 @@ Optional fields added in `0.1.1`:
   events. The default limit is 4,096 buffered events per battle, reserving room
   for a final snapshot and `battle_ended`.
 
+### `dda_analysis`
+
+Added in `0.2.0`. In observation mode, at most one event is emitted per turn
+for single trainer battles. It follows the decision snapshot and precedes
+player menus and AI action selection. Status notifications and
+`check_decisions` (including held-item use and `ON_DECISION` status effects)
+occur before the snapshot; queued actions and post-action status processing
+occur later.
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `mode` | string | Always `observation`; no adjustment is applied. |
+| `config_version` | integer | DDA schema version used for inference. |
+| `indicators` | object or null | Four normalized combat indicators, or null if unavailable. |
+| `memberships` | object | Fuzzy input and output degrees; empty when unavailable. |
+| `activated_rules` | array | Names of activated rules. |
+| `pressure` | number or null | Estimated relative pressure, or null when unavailable. |
+| `unavailable_reason` | string or null | Reason when no pressure is available. |
+
+`config_version` identifies the schema, not an immutable configuration
+snapshot. Preserve the campaign YAML separately when reproducing experiments.
+
 Export is off by default. Set `gameplay.dda_telemetry_export: true` in the
 config to write each finalized battle to JSONL. Live observation runs either
 way, since the player model depends on it.
@@ -95,11 +117,20 @@ DDA is enabled per campaign by `mods/<slug>/dda.yaml`:
 ```yaml
 version: 1
 enabled: true
+mode: observation
+# fuzzy: complete rules and centroid_steps are required
 ```
 
 A missing or invalid file disables DDA. The value is read when a new game
 starts and stored in the `dda_enabled` game variable, so saved games keep
 their choice. When disabled, no battle is observed or exported.
+New games also store `dda_campaign` in the existing game-variable map so
+observation loads the correct campaign's current YAML at battle start. Old
+saves without this variable retain telemetry but cannot run fuzzy observation;
+a warning is logged rather than guessing a campaign. Existing enabled campaigns
+without a `mode` retain telemetry and default to `disabled` observation.
+Observation requires both the saved DDA switch and a currently enabled,
+valid campaign configuration with `mode: observation`.
 
 When enabled, the client exports finalized battles in the background. A failed disk write is
 retried once; persistent failures and a full export queue are logged. A normal

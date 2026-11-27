@@ -46,7 +46,7 @@ from pygame.rect import Rect
 from tuxemon.ai.manager import AIManager
 from tuxemon.animation import Task, TaskBase
 from tuxemon.animation_entity import AnimationManager
-from tuxemon.combat.combat_context import CombatContext
+from tuxemon.combat.combat_context import BattleMode, CombatContext, CombatType
 from tuxemon.combat.machine import CombatMachine, CombatPhase
 from tuxemon.combat.reward_system import RewardSystem
 from tuxemon.combat.utils import get_battle_outcome_music, track_battles
@@ -58,7 +58,9 @@ from tuxemon.db import (
     MonsterModel,
     OutputBattle,
 )
-from tuxemon.dda.knowledge import DDA_VARIABLE
+from tuxemon.dda.controller import ObservationController
+from tuxemon.dda.knowledge import load_dda_settings
+from tuxemon.dda.types import DDA_VARIABLE, DDA_CAMPAIGN_VARIABLE
 from tuxemon.dda.telemetry import TelemetryRecorder
 from tuxemon.dda.types import SnapshotPhase
 from tuxemon.entity.npc import NPC
@@ -85,6 +87,7 @@ from tuxemon.user_config import CONFIG
 
 if TYPE_CHECKING:
     from tuxemon.base_client import BaseClient
+    from tuxemon.dda.player_model import PlayerModel
     from tuxemon.platform.events import PlayerInput
     from tuxemon.sprite import Sprite
 
@@ -134,6 +137,33 @@ def record_telemetry(
     except Exception as e:
         logger.exception("Battle telemetry recording failed: %s", e)
         return False
+
+
+def create_dda_controller(
+    context: CombatContext,
+    enabled: bool,
+    player_model: PlayerModel,
+    recorder: TelemetryRecorder,
+) -> ObservationController | None:
+    """Create observation only for eligible battles and valid campaign settings."""
+    if (
+        not enabled
+        or context.combat_type is not CombatType.TRAINER
+        or context.battle_mode is not BattleMode.SINGLE
+    ):
+        return None
+
+    campaign = context.session.player.game_variables.get(DDA_CAMPAIGN_VARIABLE)
+    if not isinstance(campaign, str) or not campaign:
+        logger.warning("DDA observation disabled: campaign is missing from save")
+        return None
+    try:
+        settings = load_dda_settings(campaign)
+        if settings.enabled and settings.mode == "observation":
+            return ObservationController(settings, player_model, recorder)
+    except Exception:
+        logger.exception("DDA observation initialization failed for %s", campaign)
+    return None
 
 
 class WaitForInputState(State):
@@ -213,6 +243,12 @@ class CombatState(CombatAnimations):
                 if self.dda_enabled
                 else None
             )
+        )
+        self.dda_controller = create_dda_controller(
+            context,
+            self.dda_enabled,
+            self.client.dda_player_model,
+            self.telemetry_recorder,
         )
 
         # Record the start of the battle for telemetry purposes.
@@ -337,7 +373,7 @@ class CombatState(CombatAnimations):
             c_session.check_decisions(self.session)
 
             # Record the state of all monsters at the start of the decision phase
-            record_telemetry(
+            snapshot_recorded = record_telemetry(
                 self.telemetry_recorder.record_monsters,
                 turn=self.combat_session.turn,
                 monsters=[
@@ -347,6 +383,12 @@ class CombatState(CombatAnimations):
                 ],
                 snapshot_phase=SnapshotPhase.DECISION,
             )
+            if self.dda_controller is not None:
+                record_telemetry(
+                    self.dda_controller.analyze,
+                    self.combat_session.turn,
+                    snapshot_recorded,
+                )
             if not self._decision_queue:
                 c_session.initialize_hit_chances()
                 self.process_player_decisions()
@@ -660,6 +702,9 @@ class CombatState(CombatAnimations):
             )
             if not self.telemetry_end_recorded:
                 return
+
+        if self.dda_controller is not None:
+            record_telemetry(self.dda_controller.close)
 
         if not self.client.config.dda_telemetry_export:
             return
