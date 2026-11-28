@@ -1,2 +1,43 @@
 version: 1
-enabled: false
+enabled: true
+mode: observation
+
+fuzzy:
+  centroid_steps: 100
+  rules:
+    - name: player_low_opponent_low
+      player: low
+      opponent: low
+      pressure: moderate
+    - name: player_low_opponent_moderate
+      player: low
+      opponent: moderate
+      pressure: high
+    - name: player_low_opponent_high
+      player: low
+      opponent: high
+      pressure: high
+    - name: player_moderate_opponent_low
+      player: moderate
+      opponent: low
+      pressure: low
+    - name: both_moderate
+      player: moderate
+      opponent: moderate
+      pressure: moderate
+    - name: player_moderate_opponent_high
+      player: moderate
+      opponent: high
+      pressure: high
+    - name: player_high_opponent_low
+      player: high
+      opponent: low
+      pressure: low
+    - name: player_high_opponent_moderate
+      player: high
+      opponent: moderate
+      pressure: low
+    - name: both_high
+      player: high
+      opponent: high
+      pressure: moderate
