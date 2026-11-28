@@ -135,22 +135,25 @@ class MamdaniFuzzyMachine:
                 )
 
         # Initial model assumption: health and availability have equal weight.
+        player_strength = (
+            values["player_health"] + values["player_availability"]
+        ) / 2.0
+        opponent_strength = (
+            values["opponent_health"] + values["opponent_availability"]
+        ) / 2.0
+        
         strengths = {
-            "player": (
-                values["player_health"] + values["player_availability"]
-            )
-            / 2.0,
-            "opponent": (
-                values["opponent_health"] + values["opponent_availability"]
-            )
-            / 2.0,
+            "player": player_strength,
+            "opponent": opponent_strength,
         }
 
+        # Fuzzify individual indicators and store memberships.
         memberships: dict[str, float] = {}
         for name, value in values.items():
             for term in FuzzyTerms:
                 memberships[f"{name}.{term.value}"] = membership(term, value)
 
+        # Fuzzify combined strength indicators and store memberships.
         strength_memberships: dict[str, dict[FuzzyTerms, float]] = {}
         for side, strength in strengths.items():
             strength_memberships[side] = {}
@@ -159,6 +162,7 @@ class MamdaniFuzzyMachine:
                 strength_memberships[side][term] = degree
                 memberships[f"{side}_strength.{term.value}"] = degree
 
+        # Apply fuzzy rules to determine output activations.
         output_activations = {term: 0.0 for term in FuzzyTerms}
         activated_rules: list[str] = []
         for rule in self.rules:
@@ -173,6 +177,7 @@ class MamdaniFuzzyMachine:
                     activation,
                 )
 
+        # Store output activations as memberships for later reference.
         for term, activation in output_activations.items():
             memberships[f"pressure.{term.value}"] = activation
 
